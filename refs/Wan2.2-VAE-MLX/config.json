@@ -1,0 +1,23 @@
+{
+  "model_type": "wan2_2_vae",
+  "z_dim": 48,
+  "c_dim": 160,
+  "dim_mult": [
+    1,
+    2,
+    4,
+    4
+  ],
+  "temperal_downsample": [
+    false,
+    true,
+    true
+  ],
+  "spatial_downsample_factor": 16,
+  "temporal_downsample_factor": 4,
+  "patch_size_input": 2,
+  "license": "apache-2.0",
+  "source": "Alibaba Wan team / bytedance-research/Lance",
+  "mlx_port_version": "0.0.1",
+  "layout": "NTHWC"
+}
