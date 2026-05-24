@@ -170,3 +170,9 @@ Format:
 - **분류:** 수치정확도 (boundary inputs).
 - **리스크:** Low for current scope (test images in-budget).  Either delegate to `transformers.Qwen2_5_VLImageProcessor` (one extra dep call, eliminates discrepancy) or add explicit `assert H_target * W_target >= min_pixels`.
 - **상태:** 기록됨.  Apply if X→T is extended to large/small images, or before any "production-realistic input" benchmark.
+
+## [STAGE 8] `Up_ResidualBlock` / `Decoder3d` first_chunk default mismatch with PT
+- **발견:** STAGE 8 §1.5 wiring 중.  PT `Up_ResidualBlock.forward(..., first_chunk=False)` and `Decoder3d.forward(..., first_chunk=False)` default to **False**.  Our MLX `Up_ResidualBlock.__call__` / `Decoder3d.__call__` default to **True** (set during STAGE 5 image path convenience: single T=1 call always has first_chunk=True).
+- **분류:** 수치정확도 (잠재 silent bug).
+- **리스크:** Today not load-bearing — STAGE 5 image callers pass `first_chunk=True` explicitly (`Wan2_2_VAE.decode` line 825), STAGE 8 standalone tests pass it explicitly too.  But the *default* divergence is a landmine: a future caller that omits the kwarg (e.g., a STAGE 5 path that gets re-entered, or a copy-paste from PT code) would get DIFFERENT semantics on the two sides — DupUp3D would drop frames on MLX side but not on PT.  Silent because shapes still align in some configurations.
+- **상태:** 기록됨.  Either flip MLX defaults to False (match PT, requires audit of STAGE 5 image-path callers and explicit `first_chunk=True` at every call site) or leave the divergence and add a `__call__` runtime warning when the default fires.  Decide at STAGE 5 image-path re-entry or before any STAGE 9 video changes.

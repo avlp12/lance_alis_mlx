@@ -659,15 +659,57 @@ class Encoder3d(nn.Module):
         self.head_norm = WanRMSNorm(c_mid)
         self.head_conv = CausalConv3d(c_mid, cfg.z_dim * 2, 3, padding=1)
 
-    def __call__(self, x: mx.array) -> mx.array:
-        x = self.conv1(x)
+    def __call__(self, x: mx.array,
+                 feat_cache: list | None = None,
+                 feat_idx: list | None = None) -> mx.array:
+        """PT `vae2_2.py:539-591`.
+
+        Top-level slot order:
+          - conv1            (1 slot)
+          - downsamples[i]   (per Down_ResidualBlock; slots determined by mult + Resample)
+          - middle (RB + Attn + RB)  (2 + 0 + 2 = 4 slots; Attn does not participate)
+          - head_conv        (1 slot)
+        """
+        # ---- conv1 ----
+        if feat_cache is not None:
+            idx = feat_idx[0]
+            cache_x = x[:, -CACHE_T:, :, :, :]
+            if cache_x.shape[1] < 2 and feat_cache[idx] is not None:
+                cache_x = mx.concatenate(
+                    [feat_cache[idx][:, -1:, :, :, :], cache_x], axis=1
+                )
+            x = self.conv1(x, cache_x=feat_cache[idx])
+            feat_cache[idx] = cache_x
+            feat_idx[0] = idx + 1
+        else:
+            x = self.conv1(x)
+
+        # ---- downsamples (each Down_ResidualBlock walks its own slots) ----
         for stage in self.downsamples:
-            x = stage(x)
+            x = stage(x, feat_cache=feat_cache, feat_idx=feat_idx)
+
+        # ---- middle: RB → Attn → RB.  AttentionBlock does not claim slots. ----
         for m in self.middle:
-            x = m(x)
+            if isinstance(m, ResidualBlock):
+                x = m(x, feat_cache=feat_cache, feat_idx=feat_idx)
+            else:
+                x = m(x)
+
+        # ---- head: norm → silu → CausalConv3d (1 slot) ----
         x = self.head_norm(x)
         x = nn.silu(x)
-        x = self.head_conv(x)
+        if feat_cache is not None:
+            idx = feat_idx[0]
+            cache_x = x[:, -CACHE_T:, :, :, :]
+            if cache_x.shape[1] < 2 and feat_cache[idx] is not None:
+                cache_x = mx.concatenate(
+                    [feat_cache[idx][:, -1:, :, :, :], cache_x], axis=1
+                )
+            x = self.head_conv(x, cache_x=feat_cache[idx])
+            feat_cache[idx] = cache_x
+            feat_idx[0] = idx + 1
+        else:
+            x = self.head_conv(x)
         return x
 
 
@@ -711,15 +753,62 @@ class Decoder3d(nn.Module):
         self.head_norm = WanRMSNorm(c_final)
         self.head_conv = CausalConv3d(c_final, out_channels, 3, padding=1)
 
-    def __call__(self, x: mx.array, first_chunk: bool = True) -> mx.array:
-        x = self.conv1(x)
+    def __call__(self, x: mx.array,
+                 feat_cache: list | None = None,
+                 feat_idx: list | None = None,
+                 first_chunk: bool = True) -> mx.array:
+        """PT `vae2_2.py:653-700`.
+
+        Top-level slot order:
+          - conv1            (1 slot)
+          - middle (RB + Attn + RB)  (2 + 0 + 2 = 4 slots)
+          - upsamples[i]     (per Up_ResidualBlock; slots determined by mult + Resample)
+          - head_conv        (1 slot)
+
+        `first_chunk` is forwarded to every Up_ResidualBlock so DupUp3D
+        can drop `factor_t - 1` frames on the first decoder call.
+        """
+        # ---- conv1 ----
+        if feat_cache is not None:
+            idx = feat_idx[0]
+            cache_x = x[:, -CACHE_T:, :, :, :]
+            if cache_x.shape[1] < 2 and feat_cache[idx] is not None:
+                cache_x = mx.concatenate(
+                    [feat_cache[idx][:, -1:, :, :, :], cache_x], axis=1
+                )
+            x = self.conv1(x, cache_x=feat_cache[idx])
+            feat_cache[idx] = cache_x
+            feat_idx[0] = idx + 1
+        else:
+            x = self.conv1(x)
+
+        # ---- middle: RB → Attn → RB ----
         for m in self.middle:
-            x = m(x)
+            if isinstance(m, ResidualBlock):
+                x = m(x, feat_cache=feat_cache, feat_idx=feat_idx)
+            else:
+                x = m(x)
+
+        # ---- upsamples (each Up_ResidualBlock walks its own slots) ----
         for stage in self.upsamples:
-            x = stage(x, first_chunk=first_chunk)
+            x = stage(x, feat_cache=feat_cache, feat_idx=feat_idx,
+                      first_chunk=first_chunk)
+
+        # ---- head ----
         x = self.head_norm(x)
         x = nn.silu(x)
-        x = self.head_conv(x)
+        if feat_cache is not None:
+            idx = feat_idx[0]
+            cache_x = x[:, -CACHE_T:, :, :, :]
+            if cache_x.shape[1] < 2 and feat_cache[idx] is not None:
+                cache_x = mx.concatenate(
+                    [feat_cache[idx][:, -1:, :, :, :], cache_x], axis=1
+                )
+            x = self.head_conv(x, cache_x=feat_cache[idx])
+            feat_cache[idx] = cache_x
+            feat_idx[0] = idx + 1
+        else:
+            x = self.head_conv(x)
         return x
 
 
