@@ -134,19 +134,20 @@ this scale of model actually goes.
 
 ## License
 
-Code we wrote (`lance_mlx/`, `tools/`, `LEARNING_LOG/`, top-level docs):
-choose your license — none committed yet; pick MIT or Apache 2.0 to match
-upstream.
+This project is licensed under the Apache License 2.0 — same as the upstream
+ByteDance Lance and Alibaba Wan 2.2 VAE.  See [LICENSE](LICENSE).
+
+Why Apache 2.0:
+
+- Matches upstream — no license-compatibility friction with `refs/Lance/`
+  and the Wan VAE code we port.
+- Patent grant (Section 3) is meaningful for ML code in a way MIT's silence
+  on patents is not.
 
 `refs/` contents are upstream snapshots and remain under their original
-licenses:
-
-- ByteDance Lance — Apache 2.0
-- RockTalk MLX ports (Lance-3B-MLX, Lance-3B-Video-MLX, Wan2.2-VAE-MLX) —
-  see each repo's LICENSE
-- Wan 2.2 VAE (Alibaba Wan team) — Apache 2.0
-
-Apache 2.0 headers preserved verbatim in each upstream file.
+licenses (Apache 2.0 for ByteDance Lance, see each subdirectory's `LICENSE`
+for the others).  Apache 2.0 headers preserved verbatim in each upstream
+file.
 
 ## Acknowledgments
 
