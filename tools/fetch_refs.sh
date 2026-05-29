@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# fetch_refs.sh — fetch the upstream PyTorch Lance snapshot used by the
+# byte-diff verification harnesses in tools/stage*_compare.py.
+#
+# Needed ONLY for verification (PT-direct-import).  MLX inference
+# (lance_mlx/) never touches refs/.
+#
+# Why a mirror instead of `huggingface-cli download bytedance-research/Lance`:
+#   Our verified snapshot's file hashes match no commit in the *current*
+#   bytedance-research/Lance HF history — likely an upstream force-push or a
+#   GitHub-vs-HF divergence.  We mirror the exact files we verified STAGE 1–9
+#   against so the harnesses reproduce bit-for-bit.  Upstream's latest may
+#   differ; that is fine for inference, not for byte-diff.
+#
+# After fetching we assert two anchor file hashes so a wrong/empty fetch
+# fails loudly rather than silently passing a different snapshot to the
+# harnesses (Lesson 18 — verification must not trust an unverified input).
+
+set -euo pipefail
+
+MIRROR_REPO="avlp12/lance-pt-snapshot"
+DEST="refs/Lance"
+
+# Anchor hashes — our verified-against snapshot (md5).
+ANCHOR_README_MD5="042feab9e4a0b3ddb944090891110d33"
+ANCHOR_INFER_MD5="85fc504a0148a5e1bfe1c3da4dac914d"
+
+_md5() {
+  # macOS `md5 -q` / Linux `md5sum` — print bare hash.
+  if command -v md5 >/dev/null 2>&1; then
+    md5 -q "$1"
+  else
+    md5sum "$1" | awk '{print $1}'
+  fi
+}
+
+echo "[fetch_refs] mirror: $MIRROR_REPO  →  $DEST/"
+
+if ! command -v huggingface-cli >/dev/null 2>&1; then
+  echo "[fetch_refs] ERROR: huggingface-cli not found. pip install huggingface_hub" >&2
+  exit 1
+fi
+
+mkdir -p "$DEST"
+if ! huggingface-cli download "$MIRROR_REPO" --repo-type model --local-dir "$DEST" 2>/dev/null; then
+  echo "" >&2
+  echo "[fetch_refs] ERROR: could not download $MIRROR_REPO." >&2
+  echo "  The mirror may not be published yet.  See the repo README" >&2
+  echo "  (Layout / Setup) for the current refs/Lance fetch instructions." >&2
+  echo "  Until then, the tools/stage*_compare.py harnesses cannot run; MLX" >&2
+  echo "  inference (lance_mlx/) is unaffected." >&2
+  exit 1
+fi
+
+# --- anchor verification (Lesson 18) ---
+readme="$DEST/README.md"
+infer="$DEST/inference_lance.py"
+fail=0
+for f in "$readme" "$infer"; do
+  if [ ! -f "$f" ]; then
+    echo "[fetch_refs] ERROR: expected file missing after fetch: $f" >&2
+    fail=1
+  fi
+done
+[ "$fail" -eq 0 ] || exit 1
+
+got_readme=$(_md5 "$readme")
+got_infer=$(_md5 "$infer")
+
+if [ "$got_readme" != "$ANCHOR_README_MD5" ]; then
+  echo "[fetch_refs] ANCHOR MISMATCH: README.md md5=$got_readme, expected $ANCHOR_README_MD5" >&2
+  echo "  The fetched snapshot is NOT the one STAGE 1–9 was verified against." >&2
+  echo "  Refusing to proceed — harness results would be against a different PT." >&2
+  exit 1
+fi
+if [ "$got_infer" != "$ANCHOR_INFER_MD5" ]; then
+  echo "[fetch_refs] ANCHOR MISMATCH: inference_lance.py md5=$got_infer, expected $ANCHOR_INFER_MD5" >&2
+  exit 1
+fi
+
+echo "[fetch_refs] OK — anchor hashes match the verified snapshot."
+echo "             README.md md5=$got_readme"
+echo "             inference_lance.py md5=$got_infer"
+echo "[fetch_refs] refs/Lance ready for tools/stage*_compare.py harnesses."
