@@ -23,8 +23,27 @@ Thumbs.db
 # Model weights — multi-GB, fetched separately via scripts
 checkpoints/
 
-# Intermediate outputs (generated images, PT reference tensors for byte-diff)
-out/
+# Claude Code local state (scheduler lock etc.)
+.claude/
+
+# Work-process scratch — publish-resume note is a tool memo, not a release
+# artifact (same principle as .claude/).  archive/_stage9_status.md is kept.
+archive/_publish_resume.md
+
+# Logs
+*.log
+
+# Intermediate outputs — most are dev artifacts (raw fixtures, PNG, logs).
+# Use `out/*` (direct children only, NOT recursive) so the `!` re-includes
+# below work — git cannot re-include a path whose *parent dir* is excluded,
+# so we must NOT blanket-ignore `out/` itself.
+out/*
+
+# Public release: curated byte-level evidence behind the verification claims.
+!out/audit_manual_v_t/
+!out/lance_3b_mlx/
+out/lance_3b_mlx/*
+!out/lance_3b_mlx/metadata.json
 
 # Nested git directories under refs/ (upstream PT repos) — keep their files,
 # drop their git history (`refs/Lance/.git/pack/*.pack` alone is ~99MB).

@@ -1,0 +1,54 @@
+{
+  "doctrine_source": "original ByteDance bytedance-research/Lance, merged: Lance_3B (image backbone) + Lance_3B_Video/model_supplement",
+  "prng": "numpy.random.default_rng",
+  "prng_seed": 0,
+  "user_prompt": "A red panda riding a wave at sunset.",
+  "t2v_system_prompt": "Describe the video by detailing the color, quantity, visible text, shape, size, texture, spatial relationships and motion/camera movements of the objects and background:",
+  "video_grid_thw": [
+    2,
+    8,
+    8
+  ],
+  "video_size_TpxHpxWpx": [
+    5,
+    128,
+    128
+  ],
+  "vae_down_spatial": 16,
+  "vae_down_temporal": 4,
+  "latent_patch_size": [
+    1,
+    1,
+    1
+  ],
+  "max_num_latent_frames": 31,
+  "max_latent_size": 64,
+  "latent_channel": 48,
+  "patch_latent_dim": 48,
+  "n_noise": 128,
+  "L_sequence": 184,
+  "noise_span": [
+    55,
+    183
+  ],
+  "split_lens": [
+    54,
+    130
+  ],
+  "attn_modes": [
+    "causal",
+    "noise"
+  ],
+  "timestep_first_step": 1.0,
+  "weight_files": {
+    "image_backbone": "checkpoints/Lance/Lance_3B/model.safetensors",
+    "video_supplement": "checkpoints/Lance/Lance_3B_Video/model_supplement.safetensors"
+  },
+  "v_t_norm": 344.4352722167969,
+  "v_t_stats": {
+    "mean": -0.0264680664986372,
+    "std": 4.3941426277160645,
+    "min": -16.875,
+    "max": 15.1875
+  }
+}
