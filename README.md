@@ -9,14 +9,19 @@ starts.
 
 | Stage | Component | Gate |
 |---|---|---|
-| 1 | PT → MLX weight conversion | ✓ bit-exact vs RockTalk reference |
+| 1 | PT → MLX weight conversion | ✓ bit-exact vs RockTalk reference (same SHA256) |
 | 2 | Qwen2.5-VL text backbone (36-layer Lance LLM) | ✓ cos = 1.000000 vs mlx-vlm stock |
 | 3 | 3D mRoPE positions | ✓ byte-identical 12/12 |
 | 4 | MoE-gen routing (MoT) | ✓ cos = 1.000000 vs clean PT re-impl |
 | 5 | Wan 2.2 VAE image path (T = 1) | ✓ ~40 dB PSNR round-trip vs PT |
 | 6 | Flow matching + CFG denoising loop | ✓ end-to-end cos ≥ 0.999 vs PT 30-step |
 | 7 | ViT + X→T + TI2I (3 pipelines) | ✓ cos ≥ 0.999 + real-photo perceptual |
-| 8 | 3D Causal Video VAE (T > 1) | **in progress** |
+| 8 | 3D Causal Video VAE (T > 1) | ✓ 4 gates cos = 1.000000 (encode + decode) |
+| 9 | Video DiT + t2v (text-to-video) | ✓ 30-step per-step cos ≥ 0.999, video pixel cos = 0.999338 |
+
+**STAGE 1–9 complete.**  Every core path of Lance — image / video generation,
+editing, understanding — is ported to MLX and byte-diff verified against the
+original PyTorch.
 
 Stage 7 numbers:
 
@@ -26,13 +31,21 @@ Stage 7 numbers:
 - TI2I 30-step PT-vs-MLX final latent: cos = 0.997340
 - Real-photo edits (orange cat → black panther, + bow tie) match RockTalk reference outputs
 
-Stage 8 progress (bottom-up):
+Stage 8 numbers (3D Causal Video VAE, bottom-up then top-level):
 
-- CausalConv3d `cache_x` (streaming temporal causal conv) — cos = 1.0, cache state max\|Δ\| = 0
-- Resample `upsample3d` / `downsample3d` (pixel-shuffle T expansion, stride-2 T contraction) — cos = 1.0, frame-order verified
-- ResidualBlock feat_cache pass-through — slot-by-slot byte-equal
-- Down_ResidualBlock (resblock × 2 + Resample slot mixing) — cos = 1.0, all 5 slots byte-equal
-- Next: Up_ResidualBlock, Encoder3d / Decoder3d, then full T = 5 encode/decode
+- CausalConv3d `cache_x`, Resample 3D, ResidualBlock, Down/Up_ResidualBlock,
+  Encoder3d / Decoder3d — each block byte-equal incl. feat_cache *state*
+- WanVAE_ top-level T = 5 round-trip vs PT: mu / log_var / xhat / xhat* all cos = 1.000000
+
+Stage 9 numbers (Video DiT + t2v, production text_template=True):
+
+- single-step PT byte-diff: v_full cos = 0.999916, v_unc cos = 0.999848, v_blend cos = 0.999452
+- 30-step per-step latent cos ≥ 0.999 (min 0.999437), CFG on→off transition stable (cos = 0.999602)
+- video pixel cos = 0.999338 (PT VAE decode vs MLX) — caught a silent VAE-scale bug
+  that the latent-level gate (0.999437) did *not*; see Lesson 23
+- t2v inference is **pure MLX** — the sequence builder was migrated from a PT
+  wrapper to a manual token concat, verified byte-identical against PT in 5
+  gates (input_ids / modality / split_lens / attn_modes / vae_token_indexes)
 
 ## Verification doctrine
 
@@ -50,42 +63,77 @@ Every block:
    real edit instructions).  Numerical pass without behavioural pass = not
    done.
 
-13 lessons distilled across the stages; see the `§4 Lessons` section of each
+## Pure-MLX inference, PyTorch only at verification time
+
+The `lance_mlx/` package never imports `torch` or `refs/Lance` at runtime.
+Inference (`t2i`, `t2v`, `x2t`, `image_edit`) runs on MLX + the HF Qwen2 fast
+tokenizer only — verified by tracing `sys.modules` after import (zero
+`torch` / `refs` / `flash_attn` modules loaded).
+
+The PT byte-diff harnesses in `tools/stage*_compare.py` *do* import upstream
+PyTorch under a shim — that is the entire point.  PyTorch is the source of
+truth at verification time and disappears at inference time.  When the t2v
+sequence builder still depended on PT at runtime (a leftover from Stage 9 §0),
+it was migrated to a pure-MLX manual token concat and re-verified byte-identical
+against the PT `ValidationDataset.t2v_sample` output before this release.
+
+## Lessons
+
+23 lessons distilled across the stages; see the `§ Lessons` section of each
 `LEARNING_LOG/stage_*.md`.  Selected:
 
-- *Single-step byte-diff ≠ multi-step correctness* (Stage 7 §3) — chunking and
+- *Single-step byte-diff ≠ multi-step correctness* (Stage 7) — chunking and
   accumulation are separate gates.
-- *"Same as PT" ≠ "working correctly"* (Stage 7 §3) — production-realistic
+- *"Same as PT" ≠ "working correctly"* (Stage 7) — production-realistic
   inputs are required.  Synthetic gradient + "saturated" instruction makes
   both PT and MLX hallucinate identically; that is reproduction, not correctness.
-- *Verification tools themselves can lie* (Stage 7 §3, bug E) — when the
+- *Verification tools themselves can lie* (Stage 7, bug E) — when the
   hypothesis disagrees with the harness, both are suspect, not just the
   hypothesis.
-- *Visual seams ≠ tile bugs* (Stage 6 §2) — 512² grid lines turned out to be
-  PRNG-identity mismatch, not VAE tile blending.
+- *Manual ground truth is an unverified hypothesis* (Stage 9, L18) — a fixture
+  we *hand-simulated* from reading PT code is not proof PT produces it.  Call
+  the PT code directly; our manual t2v sequence was wrong three different ways.
+- *Different inputs → same output = the strongest bug signature* (Stage 9, L19)
+  — two genuinely different inputs giving a byte-identical result means the
+  forward is input-independent; this is how Lesson E (a flex-attention mask
+  polarity inversion) was re-caught after it had already been fixed once.
+- *Pin the lesson in code, not just docs* (Stage 9, L21) — Lesson E re-fired
+  on reused code because the original fix was harness-local.  `pt_layer_mask()`
+  now `raise`s (not `assert`s, so `-O` can't strip it) on the wrong mask dtype.
+- *Gate the final output, not the intermediate* (Stage 9, L23) — the latent
+  cos passed at 0.999437 while the decoded video diverged at 0.948 because a
+  VAE normalization scale was dropped.  Checking pixels + the transform chain,
+  not just latents, caught it.
 
 ## Layout
 
 ```
 lance_mlx/       MLX implementations (backbone, rope, attention mask, pipelines, vae)
+                   — pure MLX, no torch/refs import at runtime
 tools/           Cross-validation harnesses + smoke tests (one per stage / block)
-LEARNING_LOG/    Per-stage notes, lessons distilled, audit trail of wrong hypotheses
-refs/            Frozen snapshots of upstream PT (Apache 2.0; re-fetchable)
-                   Lance              https://github.com/bytedance/Lance
-                   Lance-3B-MLX       https://huggingface.co/RockTalk/Lance-3B-MLX
-                   Lance-3B-Video-MLX https://huggingface.co/RockTalk/Lance-3B-Video-MLX
-                   Wan2.2-VAE-MLX     https://huggingface.co/RockTalk/Wan2.2-VAE-MLX
+                   — these *do* import upstream PT (the verification source of truth)
+LEARNING_LOG/    Per-stage notes, 23 lessons distilled, audit trail of wrong hypotheses
+out/audit_manual_v_t/  intentionally *wrong* manual ground-truth fixtures, kept as the
+                   byte-level evidence behind Lesson 18 (see its README)
+archive/         superseded working notes (kept for trace, not load-bearing)
 IMPROVEMENTS.md          deferred improvements (B-class deviations from RockTalk)
-UPSTREAM.md              upstream bugs found along the way
+UPSTREAM.md              upstream bugs found along the way (e.g. mlx-vlm multi-image RoPE)
 VERIFICATION_BACKLOG.md  deferred verification items
 LEARNING_WORK_ORDER_Lance_MLX_v2.md  project workorder
 ```
 
-Not in the repo (`.gitignore`):
+Fetched separately (not committed):
 
-- `checkpoints/` — ~30 GB model weights (fetch from HuggingFace, see Setup)
-- `out/`         — intermediate cross-validation tensors and generated images
-- `.venv/`       — Python virtual environment
+- `refs/Lance/` — upstream PT code snapshot.  `./tools/fetch_refs.sh` fetches
+  our mirrored snapshot (Apache 2.0).  We can't pin an exact upstream commit:
+  our snapshot's file hashes match no commit in the current
+  `bytedance-research/Lance` HF history (likely an upstream force-push or a
+  GitHub-vs-HF divergence), so we mirror the exact files we verified against
+  for reproducibility.  Needed only for the `tools/` harnesses, not for inference.
+- `checkpoints/` — ~30 GB model weights (HuggingFace, see Setup)
+- `out/` (except the curated `audit_manual_v_t/`) — intermediate tensors,
+  generated images, logs
+- `.venv/` — Python virtual environment
 
 ## Setup
 
@@ -100,19 +148,23 @@ pip install mlx mlx-vlm torch transformers safetensors einops pillow \
             huggingface_hub numpy
 
 mkdir -p checkpoints
-huggingface-cli download RockTalk/Lance-3B-MLX   --local-dir checkpoints/Lance-3B-MLX
-huggingface-cli download RockTalk/Wan2.2-VAE-MLX --local-dir checkpoints/Wan2.2-VAE-MLX
+# Our verified MLX conversion (byte-identical / same SHA256 as the original PT source).
+huggingface-cli download avlp12/Lance-3B-MLX-Traced --local-dir checkpoints/Lance-3B-MLX
+huggingface-cli download RockTalk/Wan2.2-VAE-MLX     --local-dir checkpoints/Wan2.2-VAE-MLX
 
-# Optional: original PT Lance — needed only for the PT-direct-import byte-diff
-# harnesses in tools/.  Skip if you only want to run MLX inference.
+# Optional: original PT Lance + upstream PT code — needed only for the
+# PT-direct-import byte-diff harnesses in tools/.  Skip for MLX inference.
 huggingface-cli download bytedance-research/Lance --local-dir checkpoints/Lance
+./tools/fetch_refs.sh   # fetches our mirrored refs/Lance snapshot (see Layout note)
 ```
 
-Run a cross-validation harness:
+Run a cross-validation harness (needs the PT side from the optional step):
 
 ```bash
-PYTHONPATH=. .venv/bin/python tools/stage7_ti2i_compare.py
-PYTHONPATH=. .venv/bin/python tools/stage8_causal_conv3d_compare.py
+PYTHONPATH=. .venv/bin/python tools/stage7_ti2i_compare.py        # TI2I 3-forward
+PYTHONPATH=. .venv/bin/python tools/stage8_wanvae_compare.py      # video VAE 4-gate
+PYTHONPATH=. .venv/bin/python tools/stage9_single_step_compare.py # t2v v_full/v_unc/v_blend
+PYTHONPATH=. .venv/bin/python tools/stage9_per_step_cos.py        # t2v 30-step per-step cos
 ```
 
 Generate an image:
@@ -149,9 +201,22 @@ licenses (Apache 2.0 for ByteDance Lance, see each subdirectory's `LICENSE`
 for the others).  Apache 2.0 headers preserved verbatim in each upstream
 file.
 
+## On the weights
+
+Our published MLX weight (`avlp12/Lance-3B-MLX-Traced`) is **bit-identical**
+(same SHA256, `5ede2f0a…`) with `RockTalk/Lance-3B-MLX` — both follow the same
+deterministic bf16-preserving conversion path from `bytedance-research/Lance`,
+so the bytes match by construction.  **The weight is not the contribution.**
+What this repo adds is the *verification* — the byte-diff harnesses
+(`tools/stage*_compare.py`), the per-stage lesson trail (`LEARNING_LOG/`), and
+the kept-verbatim wrong hypotheses (`out/audit_manual_v_t/`).  "It works" is
+cheap; "here is exactly how we checked it matches PT, including where we were
+wrong" is the point.
+
 ## Acknowledgments
 
 - ByteDance Lance team — original PyTorch model and research
-- RockTalk — MLX checkpoint conversion and standalone weight layout used as
-  parity reference
+- RockTalk — MLX checkpoint conversion and standalone weight layout; our
+  conversion reproduces theirs byte-for-byte and we use it as a parity reference
 - Alibaba Wan 2.2 team — 3D Causal VAE architecture
+- Qwen team — Qwen2.5-VL backbone + tokenizer
