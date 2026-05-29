@@ -1,0 +1,44 @@
+{
+  "name": "lance_3b_mlx (image variant)",
+  "description": "MLX safetensors port of ByteDance Lance image-3B weight. Verified byte-identical with the original PT-side conversion target.",
+  "source_pt": {
+    "repo": "bytedance-research/Lance",
+    "subdir": "Lance_3B/model.safetensors",
+    "license": "Apache-2.0",
+    "note": "Same weight family as the original PT release; our conversion preserves bf16 float values byte-equal."
+  },
+  "conversion": {
+    "tool": "tools/convert_weights.py",
+    "dtype": "preserve (PT bf16 → MLX safetensors, float values byte-equal)",
+    "deterministic": true
+  },
+  "sha256": "5ede2f0a376096d51004dad85705938abbfe3cedb64e212631527e76b9547817",
+  "size_bytes": 24740958849,
+  "num_keys": 1021,
+  "verification": {
+    "byte_identical_with": "RockTalk/Lance-3B-MLX (independent conversion of the same PT source — same SHA256)",
+    "harness_path": "tools/stage*_compare.py",
+    "stages_validated": [
+      "STAGE 1: weight conversion byte-diff",
+      "STAGE 2: Qwen2 backbone forward cos = 1.000000 vs PT",
+      "STAGE 3: 3D mRoPE positions byte-identical 12/12",
+      "STAGE 4: MoE-gen routing cos = 1.000000 vs clean PT re-impl",
+      "STAGE 5: image VAE round-trip ≥ 40 dB PSNR (T=1)",
+      "STAGE 6: T2I 30-step latent cos ≥ 0.999 vs PT 30-step",
+      "STAGE 7: TI2I 3-forward cos ≥ 0.999 vs PT, real-photo edits match RockTalk reference",
+      "STAGE 8: 3D Causal video VAE 4 gates cos = 1.000000 (encode + decode byte-clean)",
+      "STAGE 9: t2v 30-step per-step latent cos ≥ 0.999, video pixel cos = 0.999338 vs PT"
+    ]
+  },
+  "compatible_with": {
+    "lance_mlx_repo": "<see README>",
+    "python_min": "3.12",
+    "mlx_min": "0.x",
+    "platform": "Apple Silicon (developed on M3 Ultra)"
+  },
+  "notes": [
+    "This safetensors file covers the LLM backbone + adapters + ViT-out projection. The Wan 2.2 VAE weight is loaded from a separate file (checkpoints/Wan2.2-VAE-MLX/model.safetensors).",
+    "The video variant (Lance_3B_Video, ~28 GB) is a separate release; see repo README for status.",
+    "Conversion path bf16-preserving: PT and MLX share identical floating-point bit patterns, so cos = 1.000000 at the conversion gate is by construction, not by luck."
+  ]
+}

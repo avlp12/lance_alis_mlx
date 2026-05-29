@@ -1,0 +1,65 @@
+lance_alis_mlx
+Copyright 2026 avlp12
+
+This product is an Apple MLX hand-port of ByteDance Lance, a 3B unified
+multimodal model.  It is licensed under the Apache License, Version 2.0
+(see LICENSE).
+
+================================================================================
+Upstream works (all Apache-2.0) this port is derived from / depends on
+================================================================================
+
+1. ByteDance Lance — original PyTorch model, architecture, and weights.
+   https://huggingface.co/bytedance-research/Lance
+   https://github.com/bytedance/Lance
+   Licensed under Apache-2.0.
+
+   The MLX weights published alongside this repo
+   (avlp12/Lance-3B-MLX-Traced) are a bf16-preserving, deterministic
+   conversion of the original Lance image weights.  They are bit-identical
+   (same SHA256) with RockTalk/Lance-3B-MLX, which converts the same source.
+
+2. Alibaba Wan 2.2 — 3D Causal VAE architecture (the video VAE ported in
+   STAGE 5/8).
+   https://github.com/Wan-Video/Wan2.2
+   Licensed under Apache-2.0.
+
+3. Qwen2.5-VL-3B-Instruct (Alibaba Qwen team) — vision-language backbone and
+   tokenizer that Lance builds on.
+   https://huggingface.co/Qwen/Qwen2.5-VL-3B-Instruct
+   Licensed under Apache-2.0.
+
+4. RockTalk — independent MLX checkpoint conversion + standalone weight
+   layout, used in this repo as a byte-diff parity reference (STAGE 1).
+   https://huggingface.co/RockTalk/Lance-3B-MLX
+   https://huggingface.co/RockTalk/Wan2.2-VAE-MLX
+
+================================================================================
+Modifications made by this project
+================================================================================
+
+- Reimplemented the Lance forward path (Qwen2 backbone + MoT routing, 3D
+  mRoPE, Wan 2.2 VAE, ViT adapter, flow-matching + CFG, t2i/t2v/x2t/image_edit
+  pipelines) in Apple MLX.  See lance_mlx/.
+- Added per-stage byte-diff verification harnesses against the original
+  PyTorch (tools/stage*_compare.py) and a per-stage lesson trail
+  (LEARNING_LOG/).
+- Inference runs pure MLX (no torch / refs import at runtime); PyTorch is
+  imported only by the verification harnesses.
+
+Apache-2.0 license headers in upstream files under refs/ (fetched separately,
+not committed) are preserved verbatim in those files.
+
+================================================================================
+Citation (upstream Lance)
+================================================================================
+
+@misc{fu2026lanceunifiedmultimodalmodeling,
+      title         = {Lance: Unified Multimodal Modeling by Multi-Task Synergy},
+      author        = {Fengyi Fu and Mengqi Huang and Shaojin Wu and Yunsheng Jiang and Yufei Huo and Hao Li and Yinghang Song and Fei Ding and Jianzhu Guo and Qian He and Zheren Fu and Zhendong Mao and Yongdong Zhang},
+      year          = {2026},
+      eprint        = {2605.18678},
+      archivePrefix = {arXiv},
+      primaryClass  = {cs.CV},
+      url           = {https://arxiv.org/abs/2605.18678},
+}
