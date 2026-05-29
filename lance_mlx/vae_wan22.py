@@ -872,7 +872,30 @@ def unpatchify(x: mx.array, patch_size: int = 2) -> mx.array:
 #   conv1   : CausalConv3d(z_dim*2, z_dim*2, k=1)   ← mu/log_var separator
 #   conv2   : CausalConv3d(z_dim,   z_dim,   k=1)   ← pre-decoder
 #   decoder : Decoder3d
+#
+# conv1/conv2 are CausalConv3d with kernel=1 → causal pad collapses to 0,
+# they are stateless 1·1·1 convs.  They live OUTSIDE encoder/decoder, so
+# they do not consume a feat_cache slot (PT `count_conv3d` only walks
+# encoder/decoder subtrees).  They are applied to the full T-axis tensor
+# after the chunked encoder loop / before the chunked decoder loop.
 # ----------------------------------------------------------------------------
+
+
+def _count_causal_conv3d(mod) -> int:
+    """Recursive count of CausalConv3d modules in `mod`'s subtree.
+
+    Mirrors PT `count_conv3d(model)` which iterates `model.modules()`.
+    MLX's `nn.Module.modules()` returns self + every descendant in
+    pre-order — we count CausalConv3d hits across the whole sequence.
+
+    NOTE: do NOT use `vars(mod)` here.  MLX nn.Module overrides
+    `__setattr__` to stash submodules in an internal store, so
+    `vars(mod)` exposes only `_no_grad` / `_training` flags and misses
+    every child.  `.modules()` is the canonical traversal.
+    """
+    return sum(1 for sub in mod.modules() if isinstance(sub, CausalConv3d))
+
+
 class Wan2_2_VAE(nn.Module):
     def __init__(self, cfg: Optional[Wan22VAEConfig] = None):
         super().__init__()
@@ -884,34 +907,101 @@ class Wan2_2_VAE(nn.Module):
         self.decoder = Decoder3d(cfg, out_channels=12)
 
     def encode(self, image: mx.array,
-               scale: Optional[tuple[mx.array, mx.array]] = None) -> mx.array:
-        """Encode a single image (or T=1 video clip) to latent.
+               scale: Optional[tuple[mx.array, mx.array]] = None,
+               return_logvar: bool = False) -> "mx.array | tuple[mx.array, mx.array]":
+        """Encode image or video clip to latent.
 
-        image: (B, H, W, 3) or (B, 1, H, W, 3), values in [-1, 1].
-        Returns: (B, 1, H/16, W/16, z_dim).
+        image: (B, H, W, 3) or (B, T, H, W, 3), values in [-1, 1].
+
+        For T==1 we run the fast single-pass encoder (STAGE 5 behavior).
+        For T>1 we mirror PT WanVAE_.encode: chunked iteration with
+          iter_ = 1 + (T - 1) // 4
+          chunk 0 = x[:, :1, ...],  chunk i>0 = x[:, 1+4(i-1):1+4i, ...]
+        and feat_cache shared across chunks (idx reset per chunk).
+
+        scale: optional (mean, inv_std) broadcast on the last (channel)
+            axis.  Direction is INV_STD, *not* std — encode computes
+            `mu = (mu - scale[0]) * scale[1]`, decode the inverse
+            `z = z / scale[1] + scale[0]`.  Passing (mean, std) by
+            mistake silently inverts the per-channel weight and the
+            checkpoint outputs scramble (cos=1.0 with PT only when
+            both sides invert identically).  PT Wan2_2_VAE wrapper
+            uses `[mean_t, 1.0/std_t]` — mirror that.
+        return_logvar: when True returns (mu, log_var); else returns mu.
+            log_var is NOT scaled (matches PT line 781-785).
+
+        NOTE: slot-walk-order parity across chunks.  We reset
+        `feat_idx[0] = 0` per chunk and rely on every CausalConv3d call
+        site being unconditional w.r.t. T.  If a future caller adds a
+        `if T > k:` guard around a CausalConv3d, slot accounting drifts
+        silently between chunks — preserve the unconditional-conv-walk
+        invariant in encoder/decoder subtrees.
         """
         if image.ndim == 4:
             image = image[:, None, :, :, :]
         x = patchify(image, patch_size=self.cfg.patch_size_input)
-        enc_out = self.encoder(x)
-        mu_logvar = self.conv1(enc_out)
-        # Deterministic mean encode — we drop log_var.  Lance pipelines
-        # use the mean only.  Stochastic VAE sampling would need
-        # `log_var = mu_logvar[..., self.cfg.z_dim:]` and `eps * exp(0.5*log_var)`.
-        mu = mu_logvar[..., : self.cfg.z_dim]
+        T = x.shape[1]                                          # NTHWC: T is axis 1
+        if T == 1:
+            enc_out = self.encoder(x)
+        else:
+            n_slots = _count_causal_conv3d(self.encoder)
+            feat_cache: list = [None] * n_slots
+            feat_idx: list = [0]
+            iter_ = 1 + (T - 1) // 4
+            chunks = []
+            for i in range(iter_):
+                feat_idx[0] = 0                                 # reset slot index per chunk; conv-walk order must match chunk-0 every chunk
+                if i == 0:
+                    chunk_in = x[:, :1, :, :, :]
+                else:
+                    chunk_in = x[:, 1 + 4 * (i - 1): 1 + 4 * i, :, :, :]
+                chunks.append(self.encoder(chunk_in,
+                                           feat_cache=feat_cache,
+                                           feat_idx=feat_idx))
+            enc_out = mx.concatenate(chunks, axis=1)
+        mu_logvar = self.conv1(enc_out)                         # NTHWC: channel at -1
+        z_dim = self.cfg.z_dim
+        mu = mu_logvar[..., :z_dim]
+        log_var = mu_logvar[..., z_dim:]
         if scale is not None:
-            mu = (mu - scale[0]) * scale[1]
+            mu = (mu - scale[0]) * scale[1]                     # (z_dim,) broadcasts on last axis
+        if return_logvar:
+            return mu, log_var
         return mu
 
     def decode(self, z: mx.array,
                scale: Optional[tuple[mx.array, mx.array]] = None) -> mx.array:
-        """Decode latent to image.  z: (B, 1, H/16, W/16, z_dim)."""
+        """Decode latent to image/video.
+
+        z: (B, H_lat, W_lat, z_dim) or (B, T_lat, H_lat, W_lat, z_dim).
+        scale: optional (mean, INV_STD) — same direction as `encode`.
+            Decode applies `z = z / scale[1] + scale[0]` (inverse of
+            encode), so `scale[1]` is `1/std`, NOT `std`.
+
+        For T_lat==1 we run a single decoder call with first_chunk=True
+        (STAGE 5 behavior).  For T_lat>1 we mirror PT WanVAE_.decode:
+        iterate over latent T frames, first_chunk=(i==0) per call, with
+        feat_cache shared across frames (idx reset per frame).
+        """
         if z.ndim == 4:
             z = z[:, None, :, :, :]
         if scale is not None:
-            z = z / scale[1] + scale[0]
+            z = z / scale[1] + scale[0]                          # broadcasts on last axis
         x = self.conv2(z)
-        x = self.decoder(x, first_chunk=True)
-        x = unpatchify(x, patch_size=self.cfg.patch_size_input)
-        return x
+        T_lat = x.shape[1]                                       # NTHWC: T is axis 1
+        if T_lat == 1:
+            out = self.decoder(x, first_chunk=True)
+        else:
+            n_slots = _count_causal_conv3d(self.decoder)
+            feat_cache: list = [None] * n_slots
+            feat_idx: list = [0]
+            chunks = []
+            for i in range(T_lat):
+                feat_idx[0] = 0                                  # reset slot index per chunk; see encode() for invariant
+                chunks.append(self.decoder(x[:, i:i + 1, :, :, :],
+                                           feat_cache=feat_cache,
+                                           feat_idx=feat_idx,
+                                           first_chunk=(i == 0)))
+            out = mx.concatenate(chunks, axis=1)
+        return unpatchify(out, patch_size=self.cfg.patch_size_input)
 
