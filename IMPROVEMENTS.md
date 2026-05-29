@@ -176,3 +176,42 @@ Format:
 - **분류:** 수치정확도 (잠재 silent bug).
 - **리스크:** Today not load-bearing — STAGE 5 image callers pass `first_chunk=True` explicitly (`Wan2_2_VAE.decode` line 825), STAGE 8 standalone tests pass it explicitly too.  But the *default* divergence is a landmine: a future caller that omits the kwarg (e.g., a STAGE 5 path that gets re-entered, or a copy-paste from PT code) would get DIFFERENT semantics on the two sides — DupUp3D would drop frames on MLX side but not on PT.  Silent because shapes still align in some configurations.
 - **상태:** 기록됨.  Either flip MLX defaults to False (match PT, requires audit of STAGE 5 image-path callers and explicit `first_chunk=True` at every call site) or leave the divergence and add a `__call__` runtime warning when the default fires.  Decide at STAGE 5 image-path re-entry or before any STAGE 9 video changes.
+
+## [STAGE 9] flex_attention shim의 bool 변환 (Lesson E) 공용 헬퍼화
+- **발견:** STAGE 9 §0 에서 STAGE 7 §3 의 Lesson E (`patched_flex_attention` 의 `dense.to(torch.bool)` 가 bf16 0/-inf 의 polarity 반전) 가 *재발화*.  STAGE 7 ti2i_compare 는 mask 를 *bool dense* 로 layer 에 전달해 회피 (`attn_mask_LL_pt = dense_bool` line 759).  STAGE 9 PT smoke 는 *bf16 additive* 를 직접 전달 → patched_flex_attention 의 `dense.to(torch.bool)` 가 -inf 를 True (truthy) 로 변환 → attention 패턴 반전 → 모든 입력에 대해 같은 v_t 출력 (sequence/positions/mask 영향 무관).  두 시간 디버깅 후 `attention_mask=attn_dense_bool` 직접 전달로 fix.
+- **분류:** 수치정확도 (silent bug; 코드 재사용 시 매번 재발화 위험).
+- **리스크:** PT smoke 도구를 *새로 작성할 때마다* 같은 lesson 재발화 가능성.  STAGE 7 의 fix 는 그 harness 한정 → STAGE 9 PT smoke 가 *같은 shim 코드* 사용함에도 *mask 전달 방식* 만 다르게 해서 silent 발화.  미래 STAGE 9+ (video_edit, x2t_video, t2v fine-tune) PT smoke 작성 시 동일 재발화 위험.
+- **상태:** 기록됨.  공용 헬퍼 작성 후보:
+  ```python
+  # tools/_pt_smoke_common.py (가칭)
+  def install_pt_smoke_env() -> None:
+      """모든 STAGE 9+ PT smoke 가 호출하는 단일 환경 셋업 헬퍼.
+
+      - flash_attn stub (single-sequence shim)
+      - modeling.lance namespace stub
+      - flex_attention SDPA patch  ← Lesson E 처리 위치 통일
+      - transformers utils flash-attn availability disable
+
+      Lesson E 처리 contract: layer 에 mask 를 전달할 때는 *반드시* bool dense
+      (`attn_dense_bool` 형식). additive (bf16 0/-inf) 전달 금지 — silent
+      polarity 반전.  공용 헬퍼 안에 `def pt_layer_mask(dense_bool) -> torch.Tensor`
+      assertion 추가 (`assert dtype == bool`).
+      ```
+  STAGE 7 ti2i_compare + STAGE 9 PT smoke v2 가 이 헬퍼 import 하도록 리팩토링.
+  Apply: STAGE 9 §1 t2v 단계 2 production 정답지 도구 작성 시점.
+  **상태 갱신 (STAGE 9 종료):** `tools/_pt_smoke_common.py` 작성 완료, `assert` → `raise TypeError/RuntimeError` (reviewer BLOCKING D fix). STAGE 7 ti2i_compare 는 자체 inline 환경 셋업 사용 중 (STAGE 9 도구만 헬퍼 채택) — 미래 STAGE 10+ PT smoke 추가 시 STAGE 7 도 헬퍼로 리팩터.
+
+## [STAGE 9] `Wan2_2_VAE.decode` 의 production scale 을 클래스 default 로
+- **발견:** STAGE 9 §1 단계 6 closing 에서 발견 — `vae.decode(latent)` (scale 인자 생략) 호출 시 *identity scale* 적용 → video dynamic range 1.5× 발산 (cos 0.948 FAIL, latent cos 0.999437 통과인데도). t2v.py 에 `VAE_SCALE_MEAN/STD = [...]` 하드코딩 + 호출 site 에서 명시 전달로 회피.
+- **분류:** 수치정확도 (silent dynamic range 발산) + 구조 (PT 의 `Wan2_2_VAE` 인스턴스 attr 을 MLX 가 pipeline layer 에 duplicate).
+- **리스크:** 미래 video pipeline (`video_edit`, `tv2v`, etc.) 가 `vae.decode(latent)` 호출 시 동일 silent 발산. *identity scale 이 default* 인 contract 자체가 함정.
+- **상태:** 기록됨.  Apply 후보:
+  1. `Wan2_2_VAE` 에 `default_video_scale` (classmethod 또는 attr) 추가, `VAE_SCALE_MEAN/std` 옮김.
+  2. `decode(scale="identity"|"video"|tuple)` 형태로 변경, T_lat>1 + "identity" 조합 시 raise.
+  Apply: STAGE 10+ video pipeline (video_edit, tv2v) 도입 시점.  당장은 t2v.py 의 하드코딩 fix 로 동작 OK.
+
+## [STAGE 9] `_forward_v` 의 contiguous-span 가정 (TI2I video-edit 위험)
+- **발견:** `lance_mlx/pipelines/t2v.py:_forward_v` 의 vae_token_indices 가 *single contiguous span* 가정 (`assert np.array_equal(vi, arange(...))`).  현재 t2v full + uncond 모두 single noise slab 이라 OK.  미래 video_edit 의 *cond slab + noise slab* (TI2I 의 video 변형) 에서는 *두 contiguous span* — assertion 으로 알려서 silent 발화 차단.
+- **분류:** 구조 (미래 case 차단).
+- **리스크:** 미래 video_edit pipeline 작성자가 assert message "must be contiguous" 만 보고 *re-sort* 로 우회 시도 → 잘못된 위치 splice → silent.
+- **상태:** 기록됨.  Apply 후보: assertion message 에 *실패 모드* 명시 + image_edit.py 의 multi-slab scatter 패턴 pointer 추가.  Apply: video_edit pipeline 작성 시점.

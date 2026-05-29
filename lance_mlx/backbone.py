@@ -418,11 +418,12 @@ class LanceQwen2Model(nn.Module):
         if cache is None:
             cache = [None] * len(self.layers)
         if mask is None:
-            # TODO(STAGE 5/6): T2I/TI2I may want a prefix-LM mask where the
-            # GEN slab attends bidirectionally to itself while text remains
-            # causal.  String "causal" is fine for STAGE 4 text-only +
-            # routing tests, but the integrated pipeline will need an
-            # explicit mx.array mask built from the SequenceLayout.
+            # Fallback for callers that don't supply an explicit mask
+            # (text-only AR decode, unit tests).  Production T2I/T2V/TI2I
+            # pipelines always pass an mx.array mask from
+            # `build_lance_attention_mask` (text=causal, vision=full or
+            # noise per SequenceLayout), so this branch fires only for the
+            # dev paths.
             mask = "causal"
         for layer, c in zip(self.layers, cache):
             h = layer(h, position_ids, mask, c, gen_mask=gen_mask)
