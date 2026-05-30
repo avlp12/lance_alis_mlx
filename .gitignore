@@ -26,9 +26,12 @@ checkpoints/
 # Claude Code local state (scheduler lock etc.)
 .claude/
 
-# Work-process scratch — publish-resume note is a tool memo, not a release
-# artifact (same principle as .claude/).  archive/_stage9_status.md is kept.
-archive/_publish_resume.md
+# Work-process scratch — internal planning/process notes, not release artifacts.
+# LEARNING_WORK_ORDER is the observation-learning work order (reveals workflow);
+# archive/ holds transient progress notes (_publish_resume, _stage9_status, …).
+# Public surface stays README/NOTICE + LEARNING_LOG/ + out/audit_manual_v_t/.
+LEARNING_WORK_ORDER_Lance_MLX_v2.md
+archive/
 
 # Logs
 *.log
