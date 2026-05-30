@@ -5,7 +5,7 @@
 # Needed ONLY for verification (PT-direct-import).  MLX inference
 # (lance_mlx/) never touches refs/.
 #
-# Why a mirror instead of `huggingface-cli download bytedance-research/Lance`:
+# Why a mirror instead of `hf download bytedance-research/Lance`:
 #   Our verified snapshot's file hashes match no commit in the *current*
 #   bytedance-research/Lance HF history — likely an upstream force-push or a
 #   GitHub-vs-HF divergence.  We mirror the exact files we verified STAGE 1–9
