@@ -149,12 +149,12 @@ pip install mlx mlx-vlm torch transformers safetensors einops pillow \
 
 mkdir -p checkpoints
 # Our verified MLX conversion (byte-identical / same SHA256 as the original PT source).
-huggingface-cli download avlp12/Lance-3B-MLX-Traced --local-dir checkpoints/Lance-3B-MLX
-huggingface-cli download RockTalk/Wan2.2-VAE-MLX     --local-dir checkpoints/Wan2.2-VAE-MLX
+hf download avlp12/Lance-3B-Alis-MLX-Traced --local-dir checkpoints/Lance-3B-MLX
+hf download RockTalk/Wan2.2-VAE-MLX --local-dir checkpoints/Wan2.2-VAE-MLX
 
 # Optional: original PT Lance + upstream PT code — needed only for the
 # PT-direct-import byte-diff harnesses in tools/.  Skip for MLX inference.
-huggingface-cli download bytedance-research/Lance --local-dir checkpoints/Lance
+hf download bytedance-research/Lance --local-dir checkpoints/Lance
 ./tools/fetch_refs.sh   # fetches our mirrored refs/Lance snapshot (see Layout note)
 ```
 
@@ -203,7 +203,7 @@ file.
 
 ## On the weights
 
-Our published MLX weight (`avlp12/Lance-3B-MLX-Traced`) is **bit-identical**
+Our published MLX weight (`avlp12/Lance-3B-Alis-MLX-Traced`) is **bit-identical**
 (same SHA256, `5ede2f0a…`) with `RockTalk/Lance-3B-MLX` — both follow the same
 deterministic bf16-preserving conversion path from `bytedance-research/Lance`,
 so the bytes match by construction.  **The weight is not the contribution.**

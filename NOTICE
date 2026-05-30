@@ -15,7 +15,7 @@ Upstream works (all Apache-2.0) this port is derived from / depends on
    Licensed under Apache-2.0.
 
    The MLX weights published alongside this repo
-   (avlp12/Lance-3B-MLX-Traced) are a bf16-preserving, deterministic
+   (avlp12/Lance-3B-Alis-MLX-Traced) are a bf16-preserving, deterministic
    conversion of the original Lance image weights.  They are bit-identical
    (same SHA256) with RockTalk/Lance-3B-MLX, which converts the same source.
 
