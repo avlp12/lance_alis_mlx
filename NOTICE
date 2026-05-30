@@ -15,9 +15,10 @@ Upstream works (all Apache-2.0) this port is derived from / depends on
    Licensed under Apache-2.0.
 
    The MLX weights published alongside this repo
-   (avlp12/Lance-3B-Alis-MLX-Traced) are a bf16-preserving, deterministic
-   conversion of the original Lance image weights.  They are bit-identical
-   (same SHA256) with RockTalk/Lance-3B-MLX, which converts the same source.
+   (avlp12/Lance-3B-Alis-MLX-Traced) are an F32, deterministic conversion of
+   the original Lance image + video weights.  The image weight is bit-identical
+   (same SHA256) with RockTalk/Lance-3B-MLX (F32), which converts the same
+   source; a separate bf16 build is mlx-community/Lance-3B-bf16.
 
 2. Alibaba Wan 2.2 — 3D Causal VAE architecture (the video VAE ported in
    STAGE 5/8).

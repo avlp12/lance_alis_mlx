@@ -1,33 +1,32 @@
 {
   "name": "lance_3b_mlx (image variant)",
-  "description": "MLX safetensors port of ByteDance Lance image-3B weight. Verified byte-identical with the original PT-side conversion target.",
+  "description": "MLX safetensors port of ByteDance Lance image-3B weight (Lance_3B/). Verified byte-identical with the original PT-side conversion target.",
   "source_pt": {
     "repo": "bytedance-research/Lance",
     "subdir": "Lance_3B/model.safetensors",
     "license": "Apache-2.0",
-    "note": "Same weight family as the original PT release; our conversion preserves bf16 float values byte-equal."
+    "note": "Our pinned PT snapshot of Lance_3B is F32; the conversion is F32->F32, byte-equal. (Current upstream HF ships bf16, 12.37 GB; our F32 snapshot predates/diverges from it, consistent with the refs/Lance divergence.)"
   },
   "conversion": {
     "tool": "tools/convert_weights.py",
-    "dtype": "preserve (PT bf16 → MLX safetensors, float values byte-equal)",
+    "dtype": "float32 (PT F32 -> MLX F32, float values byte-equal)",
     "deterministic": true
   },
   "sha256": "5ede2f0a376096d51004dad85705938abbfe3cedb64e212631527e76b9547817",
   "size_bytes": 24740958849,
   "num_keys": 1021,
+  "dtype": "F32",
   "verification": {
-    "byte_identical_with": "RockTalk/Lance-3B-MLX (independent conversion of the same PT source — same SHA256)",
+    "byte_identical_with": "RockTalk/Lance-3B-MLX (F32, same SHA256 5ede2f0a). NOTE: this is the F32 build; a separate bf16 build (different file) is mlx-community/Lance-3B-bf16.",
     "harness_path": "tools/stage*_compare.py",
     "stages_validated": [
       "STAGE 1: weight conversion byte-diff",
       "STAGE 2: Qwen2 backbone forward cos = 1.000000 vs PT",
       "STAGE 3: 3D mRoPE positions byte-identical 12/12",
       "STAGE 4: MoE-gen routing cos = 1.000000 vs clean PT re-impl",
-      "STAGE 5: image VAE round-trip ≥ 40 dB PSNR (T=1)",
-      "STAGE 6: T2I 30-step latent cos ≥ 0.999 vs PT 30-step",
-      "STAGE 7: TI2I 3-forward cos ≥ 0.999 vs PT, real-photo edits match RockTalk reference",
-      "STAGE 8: 3D Causal video VAE 4 gates cos = 1.000000 (encode + decode byte-clean)",
-      "STAGE 9: t2v 30-step per-step latent cos ≥ 0.999, video pixel cos = 0.999338 vs PT"
+      "STAGE 5: image VAE round-trip >= 40 dB PSNR (T=1)",
+      "STAGE 6: T2I 30-step latent cos >= 0.999 vs PT 30-step",
+      "STAGE 7: TI2I 3-forward cos >= 0.999 vs PT, real-photo edits match RockTalk reference"
     ]
   },
   "compatible_with": {
@@ -37,8 +36,8 @@
     "platform": "Apple Silicon (developed on M3 Ultra)"
   },
   "notes": [
-    "This safetensors file covers the LLM backbone + adapters + ViT-out projection. The Wan 2.2 VAE weight is loaded from a separate file (checkpoints/Wan2.2-VAE-MLX/model.safetensors).",
-    "The video variant (Lance_3B_Video, ~28 GB) is a separate release; see repo README for status.",
-    "Conversion path bf16-preserving: PT and MLX share identical floating-point bit patterns, so cos = 1.000000 at the conversion gate is by construction, not by luck."
+    "This safetensors file covers the LLM backbone + adapters. The ViT and the Wan 2.2 VAE weights are loaded from separate files.",
+    "The video variant is Lance_3B_Video/ in this same repo (a standalone F32 weight that bundles the video ViT); see the model card.",
+    "F32-preserving conversion: PT and MLX share identical floating-point bit patterns, so cos = 1.000000 at the conversion gate is by construction, not by luck."
   ]
 }

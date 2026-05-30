@@ -1,0 +1,33 @@
+{
+  "name": "lance_3b_video_mlx (video variant)",
+  "description": "MLX safetensors port of ByteDance Lance video-3B weight (Lance_3B_Video/). Standalone F32 weight: shared LLM backbone + adapters + 31-frame latent position embedding + the video ViT, in one file (matching ByteDance's Lance_3B_Video layout).",
+  "source_pt": {
+    "repo": "bytedance-research/Lance",
+    "subdir": "Lance_3B_Video/ (model_supplement.safetensors, 391 keys: latent_pos_embed + vit_model)",
+    "license": "Apache-2.0",
+    "note": "The video weight is the shared Lance_3B backbone plus a video supplement (31-frame latent_pos_embed overriding the 1-frame image one, and the video ViT). ByteDance ships this merged into one Lance_3B_Video/model.safetensors; we do the same."
+  },
+  "conversion": {
+    "tool": "tools/convert_weights.py --conv-transpose (supplement) + tools/merge_video_weight.py (backbone + supplement merge)",
+    "dtype": "float32 (PT F32 -> MLX F32, byte-equal)",
+    "deterministic": true,
+    "conv_transpose": "vit_model.patch_embed.proj.weight Conv3d (O,I,T,H,W) -> MLX channels-last (O,T,H,W,I)"
+  },
+  "sha256": "03399dcdfd6beffc11bb7525228d66aba7a1081bab9c65b0e74b34cdfe2720bd",
+  "size_bytes": 28422372600,
+  "num_keys": 1411,
+  "dtype": "F32",
+  "composition": "1021 t2v keys (LLM backbone + adapters + 31-frame latent_pos_embed, shared with the image variant) + 390 vit_model keys (video ViT)",
+  "verification": {
+    "supplement_byte_identical_with": "RockTalk/Lance-3B-Video-MLX model_supplement.safetensors (391/391 byte-equal), which STAGE 9 cross-checked byte-clean vs the original PT supplement (390 identical + 1 patch_embed layout transpose).",
+    "t2v_end_to_end": "Single-step v_full/v_unc/v_blend cos = 0.999916 / 0.999848 / 0.999452 vs PT, reproducing STAGE 9. STAGE 9 also gave 30-step per-step latent cos >= 0.999 and video pixel cos = 0.999338 vs PT.",
+    "harness_path": "tools/video_standalone_verify.py, tools/stage9_*.py",
+    "honesty_note": "t2v is verified end-to-end and consumes the 1021-key subset (vit_model is not used by t2v). The bundled video ViT (vit_model, 390 keys) is byte-clean vs PT, but the x2t_video / video_edit pipelines that would consume it are NOT yet implemented in MLX."
+  },
+  "compatible_with": {
+    "lance_mlx_repo": "<see README>",
+    "python_min": "3.12",
+    "mlx_min": "0.x",
+    "platform": "Apple Silicon (developed on M3 Ultra)"
+  }
+}

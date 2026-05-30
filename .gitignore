@@ -44,6 +44,9 @@ out/*
 !out/lance_3b_mlx/
 out/lance_3b_mlx/*
 !out/lance_3b_mlx/metadata.json
+!out/lance_3b_video_mlx/
+out/lance_3b_video_mlx/*
+!out/lance_3b_video_mlx/metadata.json
 
 # Nested git directories under refs/ (upstream PT repos) — keep their files,
 # drop their git history (`refs/Lance/.git/pack/*.pack` alone is ~99MB).

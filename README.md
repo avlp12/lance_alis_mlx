@@ -148,8 +148,10 @@ pip install mlx mlx-vlm torch transformers safetensors einops pillow \
             huggingface_hub numpy
 
 mkdir -p checkpoints
-# Our verified MLX conversion (byte-identical / same SHA256 as the original PT source).
-hf download avlp12/Lance-3B-Alis-MLX-Traced --local-dir checkpoints/Lance-3B-MLX
+# Our verified MLX conversion, F32 (same SHA256 as the PT source).  The repo
+# now holds image (Lance_3B/) + video (Lance_3B_Video/) weights in subdirs;
+# RockTalk/Lance-3B-MLX supplies the matching ViT + tokenizer for the harnesses.
+hf download avlp12/Lance-3B-Alis-MLX-Traced --local-dir checkpoints/Lance-Alis
 hf download RockTalk/Wan2.2-VAE-MLX --local-dir checkpoints/Wan2.2-VAE-MLX
 
 # Optional: original PT Lance + upstream PT code — needed only for the
@@ -205,8 +207,11 @@ file.
 
 Our published MLX weight (`avlp12/Lance-3B-Alis-MLX-Traced`) is **bit-identical**
 (same SHA256, `5ede2f0a…`) with `RockTalk/Lance-3B-MLX` — both follow the same
-deterministic bf16-preserving conversion path from `bytedance-research/Lance`,
-so the bytes match by construction.  **The weight is not the contribution.**
+deterministic **F32** conversion path from `bytedance-research/Lance`, so the
+bytes match by construction.  (A separate bf16 build is `mlx-community/Lance-3B-bf16`.)
+The video weight (`Lance_3B_Video/`) is the standalone F32 build, verified
+end-to-end against PT t2v (video pixel cos 0.999338).  **The weight is not the
+contribution.**
 What this repo adds is the *verification* — the byte-diff harnesses
 (`tools/stage*_compare.py`), the per-stage lesson trail (`LEARNING_LOG/`), and
 the kept-verbatim wrong hypotheses (`out/audit_manual_v_t/`).  "It works" is

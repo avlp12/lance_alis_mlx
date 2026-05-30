@@ -159,6 +159,14 @@ def parse_args() -> argparse.Namespace:
                     help="Drop any source key whose dotted prefix matches this "
                          "(repeatable).  Use to exclude e.g. 'connector' when "
                          "it is converted into a separate ViT file.")
+    ap.add_argument("--conv-transpose", action="store_true",
+                    help="Apply the PT->MLX conv-kernel layout permutation "
+                         "(channels-last) to every rank-4/5 weight via "
+                         "conv_pt_to_mlx.  Needed for checkpoints that carry "
+                         "conv layers — e.g. the video supplement's "
+                         "vit_model.patch_embed Conv3d (O,I,T,H,W)->(O,T,H,W,I). "
+                         "Lance_3B image weights have no convs, so it is a no-op "
+                         "there; the byte-diff vs reference is the safety net.")
     return ap.parse_args()
 
 
@@ -223,6 +231,7 @@ def main() -> None:
     kept_src_numel = 0
     renames: list[tuple[str, str]] = []
     dropped: list[str] = []
+    transposed: list[str] = []
     t1 = time.time()
     with open_pt(args.src) as f:
         keys = list(f.keys())
@@ -233,12 +242,19 @@ def main() -> None:
             new_k = _rename(k)
             if new_k != k:
                 renames.append((k, new_k))
-            out[new_k] = _torch_to_mlx(f.get_tensor(k), args.dtype)
+            t = f.get_tensor(k)
+            if args.conv_transpose and t.dim() in (4, 5):
+                t = conv_pt_to_mlx(t)          # before dtype cast, per its docstring
+                transposed.append(k)
+            out[new_k] = _torch_to_mlx(t, args.dtype)
             kept_src_numel += summary[k]["numel"]
             if (i + 1) % 100 == 0:
                 print(f"[conv] {i+1}/{len(keys)}  ({(time.time()-t1):.1f}s)")
     print(f"[conv] converted {len(out)} tensors in {time.time()-t1:.1f}s "
-          f"(dropped {len(dropped)}, renamed {len(renames)})")
+          f"(dropped {len(dropped)}, renamed {len(renames)}, "
+          f"conv-transposed {len(transposed)})")
+    for k in transposed[:10]:
+        print(f"[conv]   conv-transpose  {k}")
     for src, dst in renames[:10]:
         print(f"[conv]   rename  {src}  ->  {dst}")
     if "lm_head.weight" not in out and "language_model.lm_head.weight" not in out:
