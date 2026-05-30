@@ -41,13 +41,22 @@ _md5() {
 
 echo "[fetch_refs] mirror: $MIRROR_REPO  →  $DEST/"
 
-if ! command -v huggingface-cli >/dev/null 2>&1; then
-  echo "[fetch_refs] ERROR: huggingface-cli not found. pip install huggingface_hub" >&2
+# Prefer the current `hf` CLI; fall back to the legacy `huggingface-cli`.
+# (Recent huggingface_hub ships `hf`; `huggingface-cli` is deprecated and is a
+#  no-op stub there — it prints a warning and downloads nothing.)
+if command -v hf >/dev/null 2>&1; then
+  _HF="hf"
+elif command -v huggingface-cli >/dev/null 2>&1; then
+  _HF="huggingface-cli"
+else
+  echo "[fetch_refs] ERROR: Hugging Face CLI not found. pip install -U huggingface_hub" >&2
   exit 1
 fi
 
 mkdir -p "$DEST"
-if ! huggingface-cli download "$MIRROR_REPO" --repo-type model --local-dir "$DEST" 2>/dev/null; then
+# No 2>/dev/null here: a hidden stderr is exactly what masked the deprecated-CLI
+# failure during STAGE-9 publish verification.  Let download errors be seen.
+if ! "$_HF" download "$MIRROR_REPO" --repo-type model --local-dir "$DEST"; then
   echo "" >&2
   echo "[fetch_refs] ERROR: could not download $MIRROR_REPO." >&2
   echo "  The mirror may not be published yet.  See the repo README" >&2
