@@ -12,17 +12,22 @@
 #   against so the harnesses reproduce bit-for-bit.  Upstream's latest may
 #   differ; that is fine for inference, not for byte-diff.
 #
-# After fetching we assert two anchor file hashes so a wrong/empty fetch
-# fails loudly rather than silently passing a different snapshot to the
+# After fetching we assert the inference_lance.py anchor hash so a wrong/empty
+# fetch fails loudly rather than silently passing a different snapshot to the
 # harnesses (Lesson 18 — verification must not trust an unverified input).
+# README.md is NOT anchored: the mirror ships its own descriptive README (the
+# original ByteDance one is preserved alongside as LANCE_ORIGINAL_README.md),
+# so its hash intentionally differs.  inference_lance.py is a code file we
+# verified against and never modify — one stable code anchor is enough.
 
 set -euo pipefail
 
 MIRROR_REPO="avlp12/lance-pt-snapshot"
 DEST="refs/Lance"
 
-# Anchor hashes — our verified-against snapshot (md5).
-ANCHOR_README_MD5="042feab9e4a0b3ddb944090891110d33"
+# Anchor hash — our verified-against snapshot (md5).  Pinned on a code file
+# (inference_lance.py) we never modify, NOT README.md (the mirror's README is
+# our own description of the repo, not the original ByteDance one).
 ANCHOR_INFER_MD5="85fc504a0148a5e1bfe1c3da4dac914d"
 
 _md5() {
@@ -53,32 +58,20 @@ if ! huggingface-cli download "$MIRROR_REPO" --repo-type model --local-dir "$DES
 fi
 
 # --- anchor verification (Lesson 18) ---
-readme="$DEST/README.md"
 infer="$DEST/inference_lance.py"
-fail=0
-for f in "$readme" "$infer"; do
-  if [ ! -f "$f" ]; then
-    echo "[fetch_refs] ERROR: expected file missing after fetch: $f" >&2
-    fail=1
-  fi
-done
-[ "$fail" -eq 0 ] || exit 1
+if [ ! -f "$infer" ]; then
+  echo "[fetch_refs] ERROR: expected file missing after fetch: $infer" >&2
+  exit 1
+fi
 
-got_readme=$(_md5 "$readme")
 got_infer=$(_md5 "$infer")
-
-if [ "$got_readme" != "$ANCHOR_README_MD5" ]; then
-  echo "[fetch_refs] ANCHOR MISMATCH: README.md md5=$got_readme, expected $ANCHOR_README_MD5" >&2
+if [ "$got_infer" != "$ANCHOR_INFER_MD5" ]; then
+  echo "[fetch_refs] ANCHOR MISMATCH: inference_lance.py md5=$got_infer, expected $ANCHOR_INFER_MD5" >&2
   echo "  The fetched snapshot is NOT the one STAGE 1–9 was verified against." >&2
   echo "  Refusing to proceed — harness results would be against a different PT." >&2
   exit 1
 fi
-if [ "$got_infer" != "$ANCHOR_INFER_MD5" ]; then
-  echo "[fetch_refs] ANCHOR MISMATCH: inference_lance.py md5=$got_infer, expected $ANCHOR_INFER_MD5" >&2
-  exit 1
-fi
 
-echo "[fetch_refs] OK — anchor hashes match the verified snapshot."
-echo "             README.md md5=$got_readme"
+echo "[fetch_refs] OK — anchor hash matches the verified snapshot."
 echo "             inference_lance.py md5=$got_infer"
 echo "[fetch_refs] refs/Lance ready for tools/stage*_compare.py harnesses."
