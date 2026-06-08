@@ -15,21 +15,29 @@ starts.
 | 4 | MoE-gen routing (MoT) | ✓ cos = 1.000000 vs clean PT re-impl |
 | 5 | Wan 2.2 VAE image path (T = 1) | ✓ ~40 dB PSNR round-trip vs PT |
 | 6 | Flow matching + CFG denoising loop | ✓ end-to-end cos ≥ 0.999 vs PT 30-step |
-| 7 | ViT + X→T + TI2I (3 pipelines) | ✓ cos ≥ 0.999 + real-photo perceptual |
+| 7 | ViT + X→T + TI2I (3 pipelines) | ✓ forward parity; ⚠ preprocessing bug found post-release — re-verified non-blind in Stage 11 (see correction note) |
 | 8 | 3D Causal Video VAE (T > 1) | ✓ 4 gates cos = 1.000000 (encode + decode) |
 | 9 | Video DiT + t2v (text-to-video) | ✓ 30-step per-step cos ≥ 0.999, video pixel cos = 0.999338 |
+| 11 | x2t (image + video) non-blind re-verification | ✓ patches + positions PT-recomputed byte-identical; K=8 top-1 8/8, min logit cos 0.999124 (image) / 0.999437 (video) |
 
 **STAGE 1–9 complete.**  Every core path of Lance — image / video generation,
 editing, understanding — is ported to MLX and byte-diff verified against the
 original PyTorch.
 
-Stage 7 numbers:
+Stage 7 numbers *(as originally measured — see the Post-release correction below)*:
 
 - ViT (Qwen2.5-VL vision tower): cos = 1.000000
 - X→T first-token logits: cos = 0.999923, top-1 token match
 - TI2I 3-forward (v_full / v_t_uncond / v_tv_uncond): all cos ≥ 0.999
 - TI2I 30-step PT-vs-MLX final latent: cos = 0.997340
 - Real-photo edits (orange cat → black panther, + bow tie) match RockTalk reference outputs
+
+> These confirm **forward parity** — our MLX forward matches PT's forward — but the
+> input the two sides compared was *our own* `preprocess_image` output, not a patch
+> tensor PT recomputed from the raw image. A patch-token-ordering bug (see below) was
+> therefore shared by both sides and agreed at cos = 1.0. Read the numbers as
+> "MLX matches PT given the same (then-wrong) preprocessing," not as "the preprocessing
+> matches PT's real pipeline." The Stage 11 re-verification (table row 11) closes that gap.
 
 Stage 8 numbers (3D Causal Video VAE, bottom-up then top-level):
 
@@ -47,14 +55,77 @@ Stage 9 numbers (Video DiT + t2v, production text_template=True):
   wrapper to a manual token concat, verified byte-identical against PT in 5
   gates (input_ids / modality / split_lens / attn_modes / vae_token_indexes)
 
+## Post-release correction (Stage 11, 2026-06-08)
+
+After release we found, fixed, and re-verified two bugs in our own "verified" code.
+We record them here because catching them — twice, by two independent methods, after
+release — is the verification culture working, not failing.
+
+**The weights are unaffected.** Both bugs are in our MLX *pipeline / preprocessing* and
+in a verification *harness*, not in the safetensors. The published weight stays
+byte-identical to `RockTalk/Lance-3B-MLX` (same SHA256). `t2i` / `t2v` never touch the
+ViT and are unaffected. Affected paths: `x2t` (image VQA), `image_edit` (ViT-conditioning),
+`x2t_video`.
+
+1. **ViT patch-token order** (raster → 2×2 merge-grouped). `preprocess_image` emitted
+   patch tokens in plain raster (T,H,W) order; PT's `patchify_video_with_merge` and the
+   mlx-vlm ViT both expect 2×2 spatial-merge-grouped order. Channels were identical — a
+   pure token-order bug. Against PT's real pipeline, the raster order scores cos ≈ 0.29
+   (image) / 0.36 (video); the corrected merge-grouped order scores cos = 1.000000.
+
+2. **x2t_video temporal mRoPE multiplier** (×`tokens_per_second` = 2). PT `get_rope_index`
+   scales the video time axis by `tokens_per_second`; our position builder used unit steps.
+   Video-only (T > 1); image (T = 1) is immune. Our `t2v` already had the multiplier — only
+   the x2t path missed it.
+
+**Why Stage 7's "PT direct import" gates didn't catch them.** They fed PT *our* intermediates
+instead of letting PT recompute from the raw input: the x2t / TI2I gates passed our
+`preprocess_image` patches to the PT ViT (TI2I copied our ViT output wholesale), and our
+positions to PT. Both sides inherited the same misunderstanding and agreed at cos ≈ 1.0 —
+the import was blind. This refines the doctrine below: a direct PT import is only independent
+when **PT recomputes from the raw input with its own code**.
+
+**A wrong reference hid bug 2 at Stage 3.** Stage 3 byte-checked our positions against
+mlx-vlm's `get_rope_index`, but mlx-vlm also drops the video multiplier, so our unit-step
+matched it and looked correct. PT-Lance's `get_rope_index` is the real truth.
+
+**Re-verification (non-blind).** The Stage 11 gate (`tools/stage11_x2t_verify.py`,
+`out/stage11_x2t_verify.json`) has PT recompute patches and positions from the raw frames and
+byte-asserts them against ours before any forward, over a production prompt and K = 8 tokens,
+with the old raster order kept as a discriminative control:
+
+| | image | video |
+|---|---|---|
+| patches / positions PT-recomputed byte-identical | ✓ | ✓ |
+| ViT cos vs PT real patchify | 1.000000 | 1.000000 |
+| K = 8 top-1 vs PT | 8 / 8 | 8 / 8 |
+| K = 8 logit cos (min) | 0.999124 | 0.999437 |
+| raster control cos (min) | 0.553 (collapses) | 0.968 |
+
+The temporal-mRoPE bug flipped a real output token on the x2t_video probe ('Nothing' → 'In',
+matching PT's true output after the fix), confirming it was a real bug, not cosmetic.
+
+**Honest scope.** The gate injects identical pre-resized frames to both sides; PT's real
+`vit_transform` bucket resize is *not* exercised (claim scope = "given identical resized /
+normalized frames and grid"). `image_edit`'s 3-component CFG velocity is **not yet
+re-verified non-blind** (its Stage 7 harness still copies our ViT output); the ViT
+conditioning it relies on shares the now-fixed `preprocess_image` *code* (so that code is
+re-verified), but `image_edit`'s full pipeline is not itself re-verified non-blind — we do
+not claim it is "covered" by inference. `video_edit` is not yet implemented.
+
 ## Verification doctrine
 
 Every block:
 
 1. **Original PT direct import** (not a clean re-implementation).  `refs/Lance/`
    is imported under a flash_attn / flex_attention shim so we run the upstream
-   code on CPU.  Algorithmic misunderstandings can't be shared between the two
-   sides this way.
+   code on CPU.  A direct import only stays independent when **PT recomputes from
+   the raw input with its own code**; feeding PT *our* intermediate (preprocessed
+   patches, ViT output, positions) re-shares the very misunderstanding the import
+   is meant to rule out, and both sides then agree at cos ≈ 1.0 while wrong.  Stage 7's
+   x2t / TI2I gates did exactly that and stayed blind to a patch-ordering bug until
+   Stage 11 — see *Post-release correction* above.  The corrected gates have PT derive
+   patches and positions from the raw frames and byte-assert them against ours.
 2. **Same PRNG** on both sides (NumPy `default_rng`) so initial noise is
    bit-identical.
 3. **Byte-diff** at every layer / step / forward variant.  `cos ≥ 0.999` is the
@@ -79,8 +150,8 @@ against the PT `ValidationDataset.t2v_sample` output before this release.
 
 ## Lessons
 
-23 lessons distilled across the stages; see the `§ Lessons` section of each
-`LEARNING_LOG/stage_*.md`.  Selected:
+23 lessons distilled across the stages, plus 2 added post-release (Stage 11); see the
+`§ Lessons` section of each `LEARNING_LOG/stage_*.md`.  Selected:
 
 - *Single-step byte-diff ≠ multi-step correctness* (Stage 7) — chunking and
   accumulation are separate gates.
@@ -104,6 +175,16 @@ against the PT `ValidationDataset.t2v_sample` output before this release.
   cos passed at 0.999437 while the decoded video diverged at 0.948 because a
   VAE normalization scale was dropped.  Checking pixels + the transform chain,
   not just latents, caught it.
+- *A PT-direct-import gate is only non-blind if PT recomputes from raw inputs*
+  (Stage 11) — feeding PT our intermediates (preprocessed patches, ViT output,
+  positions) re-shares the misunderstanding the direct import was meant to rule
+  out.  A patch-ordering bug had agreed at cos = 1.0, blind, since release.  This
+  is Lesson 19 / bug E firing at the *harness-architecture* level, not just a mask.
+- *A wrong reference makes both sides wrong together* (Stage 11) — Stage 3
+  byte-checked our mRoPE positions against mlx-vlm's `get_rope_index`, which drops
+  the video `tokens_per_second` multiplier too, so our matching unit-step looked
+  correct.  PT-Lance is the real truth; against it the x2t_video temporal positions
+  were off by ×2.
 
 ## Layout
 

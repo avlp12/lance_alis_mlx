@@ -44,7 +44,10 @@ Modifications made by this project
   pipelines) in Apple MLX.  See lance_mlx/.
 - Added per-stage byte-diff verification harnesses against the original
   PyTorch (tools/stage*_compare.py) and a per-stage lesson trail
-  (LEARNING_LOG/).
+  (LEARNING_LOG/).  Note: two bugs were found and fixed after the initial
+  release (ViT patch-token order; x2t_video temporal mRoPE), in the MLX
+  pipeline / harness only — the published weights are unchanged.  See the
+  repo README "Post-release correction" section.
 - Inference runs pure MLX (no torch / refs import at runtime); PyTorch is
   imported only by the verification harnesses.
 

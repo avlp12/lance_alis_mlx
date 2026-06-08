@@ -1,6 +1,7 @@
 # STAGE 7 — TI2I + X→T + ViT ★ multimodal extension
 
-**Status:** ✅ PASSED  (2026-05-23, full cross-validation + real-photo perceptual)
+**Status:** ✅ PASSED (2026-05-23) — ⚠ **amended 2026-06-08 (Stage 11): the §1/§2 gates
+were forward-parity-only and blind to preprocessing; see the banner and §8.**
 **Deliverable:**
 - `lance_mlx/vit.py` (Qwen2.5-VL vision tower wrapper)
 - `lance_mlx/pipelines/x2t.py` (image understanding AR pipeline)
@@ -29,6 +30,16 @@
    - **사용자 perceptual 판정: 의도 편집이 정확히 수행** → TI2I 진짜 작동 확정
 
 ---
+
+> **⚠ Post-release correction (2026-06-08, Stage 11).** The §1/§2 ViT and X→T gates below
+> passed as *forward parity* but were **blind to preprocessing**: the PT-direct-import
+> harnesses fed PT *our* `preprocess_image` patches (and, for TI2I, our ViT output wholesale)
+> instead of letting PT patchify from the raw image. A patch-token-ordering bug (raster vs
+> 2×2 merge-grouped) was thus shared by both sides and agreed at cos = 1.0. A second bug
+> (x2t_video temporal mRoPE ×2) is video-only and didn't touch these image gates. Both were
+> fixed and re-verified non-blind in Stage 11. The cos numbers in §1–§3 are left **as
+> originally measured** — read them as "MLX matches PT given the same (then-wrong)
+> preprocessing," not "preprocessing matches PT's real pipeline." Full account: **§8**.
 
 ## §1. ViT (Qwen2.5-VL vision tower) MLX port
 
@@ -277,3 +288,57 @@ Reviewer: Opus, code-reviewer agent.  Scope: files produced in STAGE 7 only
 - **Regression check:** STAGE 2 forward (top-8 logits OK), STAGE 4 routing self-test (A/B/C properties hold),
   STAGE 6 T2I 30-step (latent stats consistent with pre-STAGE-7 run), STAGE 7 §3 TI2I single-step (cos
   identical to pre-rename) — all pass.
+
+---
+
+## §8. Post-release correction (Stage 11, 2026-06-08)
+
+> **Timeline.** Bugs **discovered and fixed 2026-05-31** (right after the 2026-05-30 release);
+> **docs corrected 2026-06-08**.
+
+STAGE 7을 발표한 뒤, 여기 §1–§3이 **장님 게이트** 위에 얹혀 있었음을 발견했다. 두 버그를
+우리 스스로 찾아 고치고 비-장님으로 재검증했다.
+
+### 두 버그
+- **① ViT 전처리 patch-order (raster → 2×2 merge-grouped).** `preprocess_image`/`_patchify_frames`가
+  패치를 raster (T,H,W)로 냈다. PT `patchify_video_with_merge`와 mlx-vlm ViT는 2×2 merge-grouped를
+  기대. PT 실제 파이프라인 대비 raster cos ≈ 0.29(image)/0.36(video), merge-grouped cos = 1.000000.
+  blast radius: x2t / image_edit(ViT-cond) / x2t_video. t2i/t2v 무관.
+- **② x2t_video temporal mRoPE 승수(×tokens_per_second=2) 누락.** PT `get_rope_index`
+  (qwen2_navit.py:1258) video 분기는 시간축에 ×2; 우리 위치빌더는 unit step. T>1만 영향, image 면역.
+  우리 t2v는 이미 승수가 맞았다 — x2t 경로만 빠졌다.
+
+### 왜 §1/§2가 못 봤나 (핵심 교훈, Lesson 13/E의 상위 차원 재발)
+- §1 ViT, §2 X→T 게이트(`stage7_vit_compare.py` / `stage7_x2t_compare.py:240-242,265`)는 PT에
+  *원시 이미지*가 아니라 *우리 `preprocess_image` 출력*을 줬다. TI2I(`stage7_ti2i_compare.py:685`)는
+  더 심하게 우리 ViT 출력을 통째 복사. 양쪽이 같은 (틀린) 입력을 공유 → cos = 1.0 합의 → 전처리
+  순서 버그에 구조적 장님. **"PT 직접 import"는 PT가 원시 입력부터 자기 코드로 다시 계산할 때만 독립.**
+- ② 가 STAGE 3을 통과한 이유: STAGE 3은 우리 위치를 **mlx-vlm** `get_rope_index`와 byte-검증했는데
+  mlx-vlm도 video 승수를 드롭 → 우리 unit-step과 일치해 보였다. **레퍼런스가 틀리면 같이 틀린다.**
+
+### 재검증 (비-장님)
+`tools/stage11_x2t_verify.py`(+`stage11_vit_compare`, `stage11_x2t_{image,video}_compare`,
+`stage11_x2t_video_positions_compare`, `stage11_c_discriminative`). PT가 원시 프레임에서 patches·
+positions를 독립 산출 + byte-assert, production prompt, K=8, raster 대조군 상시.
+
+| | image | video |
+|---|---|---|
+| patches / positions PT-독립 byte-identical | ✓ | ✓ |
+| ViT cos vs PT 실제 patchify | 1.000000 | 1.000000 |
+| K=8 top-1 vs PT | 8/8 | 8/8 |
+| K=8 logit cos (min) | 0.999124 | 0.999437 |
+| RASTER 대조군 cos (min) | 0.553 (붕괴) | 0.968 |
+
+② 는 x2t_video 프로브의 실제 top-1 토큰을 **'Nothing' → 'In'** 으로 바꿨다(수정 후 PT 진짜 출력과
+일치) — 실버그였다는 증거. log: `out/stage11_x2t_verify.json`.
+
+### 스코프 (정직)
+동일 pre-resize 프레임 주입(PT `vit_transform` bucket resize는 out-of-scope) / normalization 재타이핑 /
+video ViT 라운드트립(mitigated 390/390) / image_edit 3-comp CFG velocity 비-장님 재검증 미실행
+(분해논증만; fresh 세션) / video_edit 미착수.
+
+### 새 교훈 2개 (numbering은 형님 확정)
+- **Lesson 24 — PT 직접 import도 우리 중간결과를 먹이면 장님.** Lesson E(검증 도구가 거짓말)와
+  Lesson 19(다른 입력 → 같은 출력 = 최강 버그 시그니처)가 *harness 아키텍처 차원*에서 재발.
+- **Lesson 25 — 레퍼런스가 틀리면 두 쪽이 같이 틀린다.** 진짜 truth는 PT-Lance `get_rope_index`,
+  mlx-vlm이 아니다.

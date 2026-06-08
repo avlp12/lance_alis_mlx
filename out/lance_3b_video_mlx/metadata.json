@@ -22,12 +22,18 @@
     "supplement_byte_identical_with": "RockTalk/Lance-3B-Video-MLX model_supplement.safetensors (391/391 byte-equal), which STAGE 9 cross-checked byte-clean vs the original PT supplement (390 identical + 1 patch_embed layout transpose).",
     "t2v_end_to_end": "Single-step v_full/v_unc/v_blend cos = 0.999916 / 0.999848 / 0.999452 vs PT, reproducing STAGE 9. STAGE 9 also gave 30-step per-step latent cos >= 0.999 and video pixel cos = 0.999338 vs PT.",
     "harness_path": "tools/video_standalone_verify.py, tools/stage9_*.py",
-    "honesty_note": "t2v is verified end-to-end and consumes the 1021-key subset (vit_model is not used by t2v). The bundled video ViT (vit_model, 390 keys) is byte-clean vs PT, but the x2t_video / video_edit pipelines that would consume it are NOT yet implemented in MLX."
+    "honesty_note": "t2v is verified end-to-end and consumes the 1021-key subset (vit_model is not used by t2v). The bundled video ViT (vit_model, 390 keys) is byte-clean vs PT. x2t_video is now implemented and re-verified non-blind in STAGE 11 (PT-recomputed patches & positions byte-identical, K=8 top-1 8/8, min logit cos 0.999437; scope: given identical resized/normalized frames and grid). video_edit is still NOT implemented. See post_release_correction."
   },
   "compatible_with": {
     "lance_mlx_repo": "<see README>",
     "python_min": "3.12",
     "mlx_min": "0.x",
     "platform": "Apple Silicon (developed on M3 Ultra)"
+  },
+  "post_release_correction": {
+    "date": "2026-06-08",
+    "summary": "Two bugs found after release and fixed: (1) ViT patch-token order (raster vs 2x2 merge-grouped), affecting x2t / image_edit / x2t_video; (2) x2t_video temporal mRoPE multiplier (tokens_per_second=2) missing, video-only. STAGE 7's PT-direct-import gates were blind: they fed PT our intermediates instead of having PT recompute from raw inputs. Re-verified non-blind in STAGE 11 (x2t_video: PT-recomputed patches & positions byte-identical, K=8 top-1 8/8, min logit cos 0.999437).",
+    "weights_affected": false,
+    "note": "These are MLX pipeline/harness bugs, not weight bugs. This safetensors is unchanged (SHA256 still 03399dcd...). t2v does not use the ViT and is unaffected."
   }
 }

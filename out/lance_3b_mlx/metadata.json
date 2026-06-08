@@ -26,7 +26,8 @@
       "STAGE 4: MoE-gen routing cos = 1.000000 vs clean PT re-impl",
       "STAGE 5: image VAE round-trip >= 40 dB PSNR (T=1)",
       "STAGE 6: T2I 30-step latent cos >= 0.999 vs PT 30-step",
-      "STAGE 7: TI2I 3-forward cos >= 0.999 vs PT, real-photo edits match RockTalk reference"
+      "STAGE 7: TI2I 3-forward cos >= 0.999 vs PT (forward parity; the ViT preprocessing it shared with PT was later found mis-ordered -- see post_release_correction)",
+      "STAGE 11: x2t image+video re-verified non-blind -- PT-recomputed patches & positions byte-identical, K=8 top-1 8/8, min logit cos 0.999124 (image) / 0.999437 (video)"
     ]
   },
   "compatible_with": {
@@ -39,5 +40,11 @@
     "This safetensors file covers the LLM backbone + adapters. The ViT and the Wan 2.2 VAE weights are loaded from separate files.",
     "The video variant is Lance_3B_Video/ in this same repo (a standalone F32 weight that bundles the video ViT); see the model card.",
     "F32-preserving conversion: PT and MLX share identical floating-point bit patterns, so cos = 1.000000 at the conversion gate is by construction, not by luck."
-  ]
+  ],
+  "post_release_correction": {
+    "date": "2026-06-08",
+    "summary": "Two bugs found after release and fixed: (1) ViT patch-token order (raster vs 2x2 merge-grouped), affecting x2t / image_edit / x2t_video; (2) x2t_video temporal mRoPE multiplier (tokens_per_second=2) missing, video-only. STAGE 7's PT-direct-import gates were blind: they fed PT our intermediates instead of having PT recompute from raw inputs, so both sides shared the misunderstanding and agreed at cos ~ 1.0. Re-verified non-blind in STAGE 11.",
+    "weights_affected": false,
+    "note": "These are MLX pipeline/harness bugs, not weight bugs. This safetensors is unchanged (SHA256 still 5ede2f0a...547817). t2i / t2v do not use the ViT and are unaffected."
+  }
 }

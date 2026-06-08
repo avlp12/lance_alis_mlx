@@ -170,6 +170,8 @@ Format:
 - **분류:** 수치정확도 (boundary inputs).
 - **리스크:** Low for current scope (test images in-budget).  Either delegate to `transformers.Qwen2_5_VLImageProcessor` (one extra dep call, eliminates discrepancy) or add explicit `assert H_target * W_target >= min_pixels`.
 - **상태:** 기록됨.  Apply if X→T is extended to large/small images, or before any "production-realistic input" benchmark.
+  ★ 별개 버그 주의: 이 항목은 *resize budget*(max/min_pixels) 건이다.  실제 release-blocking 이었던 것은
+  *patch-token 순서*(raster vs 2×2 merge-grouped) — 아래 STAGE 11 항목 참조.
 
 ## [STAGE 8] `Up_ResidualBlock` / `Decoder3d` first_chunk default mismatch with PT
 - **발견:** STAGE 8 §1.5 wiring 중.  PT `Up_ResidualBlock.forward(..., first_chunk=False)` and `Decoder3d.forward(..., first_chunk=False)` default to **False**.  Our MLX `Up_ResidualBlock.__call__` / `Decoder3d.__call__` default to **True** (set during STAGE 5 image path convenience: single T=1 call always has first_chunk=True).
@@ -215,3 +217,42 @@ Format:
 - **분류:** 구조 (미래 case 차단).
 - **리스크:** 미래 video_edit pipeline 작성자가 assert message "must be contiguous" 만 보고 *re-sort* 로 우회 시도 → 잘못된 위치 splice → silent.
 - **상태:** 기록됨.  Apply 후보: assertion message 에 *실패 모드* 명시 + image_edit.py 의 multi-slab scatter 패턴 pointer 추가.  Apply: video_edit pipeline 작성 시점.
+
+## [STAGE 11] ViT patch-token order — raster → 2×2 merge-grouped (★ release-blocking, FIXED)
+- **발견:** `preprocess_image`/`_patchify_frames`가 ViT 패치를 plain raster (T,H,W)로 냈다.
+  PT `data_utils.patchify_video_with_merge` + mlx-vlm `VisionModel`은 2×2 merge-grouped를 기대
+  (연속 4토큰=한 2×2 spatial-merge 블록).  채널순서 동일 — 순수 토큰순서 버그.
+- **분류:** 수치정확도 (release-blocking; x2t / image_edit / x2t_video ViT-cond 전부).
+- **리스크:** parity 깸 → *고침*.  t2i/t2v 무관(ViT 미사용).  weight 무관(전처리 버그).
+- **상태:** **적용됨(measurement).**  `_patchify_frames` merge-grouped permute
+  (THWC `transpose(0,2,5,3,6,8,1,4,7)`), `preprocess_image`는 위임.  측정: PT-real 대비
+  raster cos 0.29(image)/0.36(video) → merge-grouped cos 1.000000.  비-장님 재검증
+  `tools/stage11_x2t_verify.py`: K=8 top-1 8/8, min cos 0.999124(image)/0.999437(video),
+  raster 대조군 min 0.553/0.968 (discriminative).
+
+## [STAGE 11] x2t_video temporal mRoPE multiplier (×tokens_per_second=2) (FIXED)
+- **발견:** PT `get_rope_index`(qwen2_navit.py:1258) video 분기는 시간축에 ×`tokens_per_second`=2.
+  우리 `_image_position_block`(rope.py)는 unit step.  T>1(video)만 영향, T=1(image) 면역.
+  우리 t2v.py는 승수가 맞게 있었다 — x2t 경로만 누락.
+- **분류:** 수치정확도 (video-only).
+- **리스크:** parity 깸 → *고침*.  scale=1 신·구 byte-identical(무회귀).
+- **상태:** **적용됨(measurement).**  `rope.py` `VisionSpec.temporal_scale`(default 1),
+  `x2t.py` `VIDEO_TEMPORAL_SCALE=2`.  측정: 우리 위치 vs PT `get_rope_index` byte-identical
+  (`stage11_x2t_video_positions_compare.py`); top-1 'Nothing'→'In'(버그가 실제 출력 변경, 수정 후
+  PT 진짜 출력과 일치).
+
+## [STAGE 11] 검증 harness 클래스 결함 — PT-direct-import 에 우리 중간결과 주입 = 장님 (방법론)
+- **발견:** STAGE 7 `stage7_x2t_compare.py`(:240-242,265)는 우리 `preprocess_image` 패치를 PT ViT에,
+  `stage7_ti2i_compare.py`(:685)는 우리 ViT 출력을 PT에 통째 주입.  "PT 원본 import" 인데 PT가 원시
+  입력에서 다시 계산하지 않음 → 양쪽이 같은 오해 공유 → cos≈1.0 합의로 전처리/위치 버그 은폐.
+- **분류:** 검증 (방법론 결함 — 모든 multimodal 게이트에 잠재).
+- **리스크:** 미래 게이트가 같은 패턴 재현 시 silent.
+- **상태:** **교정됨(방법론).**  비-장님 계약: PT는 *원시 입력*에서 patches·positions를 자기 코드로
+  산출 + byte-assert 후 forward.  `stage11_x2t_verify.py`가 이 계약 구현.  공개문서 doctrine 보정.
+
+## [STAGE 11] 교훈 — 레퍼런스가 틀리면 두 쪽이 같이 틀린다 (Lesson 25)
+- **발견:** STAGE 3이 build_positions 를 mlx-vlm `get_rope_index`와 byte-검증했으나 mlx-vlm 도 video
+  `tokens_per_second` 승수 드롭 → 우리 unit-step 과 일치해 ②를 못 봄.
+- **분류:** 검증 (레퍼런스 선택).
+- **리스크:** "검증된 라이브러리"가 같은 누락을 공유하면 parity 가 거짓 안심.
+- **상태:** 기록됨(교훈).  진짜 truth = PT-Lance `get_rope_index`.  LEARNING_LOG stage_7 §8 + 공개문서.
