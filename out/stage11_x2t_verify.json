@@ -1,0 +1,206 @@
+[
+  {
+    "name": "image",
+    "grid": [
+      1,
+      12,
+      18
+    ],
+    "n_vis": 54,
+    "L": 92,
+    "K": 8,
+    "patches_byte_identical": true,
+    "positions_byte_identical_to_PT": true,
+    "vit_cos_fixed": 0.9999999996583983,
+    "answer_fixed": "Yes, the largest segment in the survey",
+    "cos_fixed_min": 0.999124148741308,
+    "fixed_top1_all_agree": true,
+    "cos_raster_min": 0.5527719833674016,
+    "raster_discriminates": true,
+    "steps": [
+      {
+        "k": 0,
+        "tok": 9454,
+        "tok_str": "Yes",
+        "cos_fixed": 0.9999394565921984,
+        "cos_raster": 0.9797575521393259,
+        "pt_top": 9454,
+        "fixed_top": 9454,
+        "raster_top": 9454
+      },
+      {
+        "k": 1,
+        "tok": 11,
+        "tok_str": ",",
+        "cos_fixed": 0.9999847012085543,
+        "cos_raster": 0.9982896357017359,
+        "pt_top": 11,
+        "fixed_top": 11,
+        "raster_top": 11
+      },
+      {
+        "k": 2,
+        "tok": 279,
+        "tok_str": " the",
+        "cos_fixed": 0.9994461642650915,
+        "cos_raster": 0.8623221746584588,
+        "pt_top": 279,
+        "fixed_top": 279,
+        "raster_top": 279
+      },
+      {
+        "k": 3,
+        "tok": 7772,
+        "tok_str": " largest",
+        "cos_fixed": 0.9997240789861662,
+        "cos_raster": 0.9091678866588138,
+        "pt_top": 7772,
+        "fixed_top": 7772,
+        "raster_top": 7772
+      },
+      {
+        "k": 4,
+        "tok": 10238,
+        "tok_str": " segment",
+        "cos_fixed": 0.999124148741308,
+        "cos_raster": 0.5527719833674016,
+        "pt_top": 10238,
+        "fixed_top": 10238,
+        "raster_top": 10238
+      },
+      {
+        "k": 5,
+        "tok": 304,
+        "tok_str": " in",
+        "cos_fixed": 0.9997885298712005,
+        "cos_raster": 0.9449304633377615,
+        "pt_top": 304,
+        "fixed_top": 304,
+        "raster_top": 304
+      },
+      {
+        "k": 6,
+        "tok": 279,
+        "tok_str": " the",
+        "cos_fixed": 0.9991256748964723,
+        "cos_raster": 0.836880422063419,
+        "pt_top": 279,
+        "fixed_top": 279,
+        "raster_top": 279
+      },
+      {
+        "k": 7,
+        "tok": 10572,
+        "tok_str": " survey",
+        "cos_fixed": 0.9998283553575569,
+        "cos_raster": 0.8742768934832177,
+        "pt_top": 10572,
+        "fixed_top": 10572,
+        "raster_top": 821
+      }
+    ],
+    "pass": true
+  },
+  {
+    "name": "video",
+    "grid": [
+      4,
+      8,
+      16
+    ],
+    "n_vis": 128,
+    "L": 181,
+    "K": 8,
+    "patches_byte_identical": true,
+    "positions_byte_identical_to_PT": true,
+    "vit_cos_fixed": 0.9999999993889538,
+    "answer_fixed": "C<|im_end|>1<|im_end|><|im_end|>2<|im_end|>2",
+    "cos_fixed_min": 0.9994368654098891,
+    "fixed_top1_all_agree": true,
+    "cos_raster_min": 0.968187674568494,
+    "raster_discriminates": true,
+    "steps": [
+      {
+        "k": 0,
+        "tok": 34,
+        "tok_str": "C",
+        "cos_fixed": 0.9997751086677462,
+        "cos_raster": 0.968187674568494,
+        "pt_top": 34,
+        "fixed_top": 34,
+        "raster_top": 34
+      },
+      {
+        "k": 1,
+        "tok": 151645,
+        "tok_str": "<|im_end|>",
+        "cos_fixed": 0.9994368654098891,
+        "cos_raster": 0.9765822909320916,
+        "pt_top": 151645,
+        "fixed_top": 151645,
+        "raster_top": 151645
+      },
+      {
+        "k": 2,
+        "tok": 16,
+        "tok_str": "1",
+        "cos_fixed": 0.9999695311010576,
+        "cos_raster": 0.9938825101687445,
+        "pt_top": 16,
+        "fixed_top": 16,
+        "raster_top": 16
+      },
+      {
+        "k": 3,
+        "tok": 151645,
+        "tok_str": "<|im_end|>",
+        "cos_fixed": 0.9998945144075431,
+        "cos_raster": 0.9926836478080815,
+        "pt_top": 151645,
+        "fixed_top": 151645,
+        "raster_top": 151645
+      },
+      {
+        "k": 4,
+        "tok": 151645,
+        "tok_str": "<|im_end|>",
+        "cos_fixed": 0.9999268973285138,
+        "cos_raster": 0.9894174638692229,
+        "pt_top": 151645,
+        "fixed_top": 151645,
+        "raster_top": 151645
+      },
+      {
+        "k": 5,
+        "tok": 17,
+        "tok_str": "2",
+        "cos_fixed": 0.9999765466695443,
+        "cos_raster": 0.9968163328487669,
+        "pt_top": 17,
+        "fixed_top": 17,
+        "raster_top": 19
+      },
+      {
+        "k": 6,
+        "tok": 151645,
+        "tok_str": "<|im_end|>",
+        "cos_fixed": 0.9999270625725827,
+        "cos_raster": 0.9968119228708163,
+        "pt_top": 151645,
+        "fixed_top": 151645,
+        "raster_top": 151645
+      },
+      {
+        "k": 7,
+        "tok": 17,
+        "tok_str": "2",
+        "cos_fixed": 0.9999715242392538,
+        "cos_raster": 0.9975408602471716,
+        "pt_top": 17,
+        "fixed_top": 17,
+        "raster_top": 151645
+      }
+    ],
+    "pass": true
+  }
+]

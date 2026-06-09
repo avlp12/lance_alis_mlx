@@ -46,6 +46,13 @@ class VisionSpec:
     t: int               # post-merge temporal grid
     h: int               # post-merge spatial-H grid
     w: int               # post-merge spatial-W grid
+    # Temporal mRoPE step = second_per_grid_t · tokens_per_second.  PT Lance
+    # `get_rope_index` (qwen2_navit.py:1258) scales the temporal axis by this on
+    # the VIDEO branch (=2 for Lance: second_per_grid_t 1.0 × tokens_per_second 2);
+    # the generation path already does it (t2v.py:112).  Default 1 = image / T=1
+    # (where arange(1)·k = [0] regardless) — keeps x2t-image / image_edit / the
+    # STAGE-3 checks byte-identical.  x2t-video MUST pass 2 (STAGE 11 fix).
+    temporal_scale: int = 1
 
 
 def text_positions(seq_len: int, batch: int = 1, dtype=mx.int32) -> mx.array:
@@ -68,15 +75,20 @@ def text_positions(seq_len: int, batch: int = 1, dtype=mx.int32) -> mx.array:
 # `max(positions inside) + 1` to keep the global counter contiguous.
 # ---------------------------------------------------------------------------
 def _image_position_block(t: int, h: int, w: int,
-                          base: int = 0, dtype=mx.int32) -> mx.array:
+                          base: int = 0, *, temporal_scale: int = 1,
+                          dtype=mx.int32) -> mx.array:
     """Return shape (3, t*h*w) — the position triples for one image's
     placeholder tokens.  `base` is the position the *first placeholder*
     will receive on all three rows: i.e. the i-th placeholder sits at
-    `base + (t_i, h_i, w_i)`.  The caller is responsible for pre-
+    `base + (t_i·temporal_scale, h_i, w_i)`.  The caller is responsible for pre-
     incrementing its cursor past the `<vision_start>` token before
     calling.  Iteration order is (t, h, w) row-major.
+
+    `temporal_scale` matches PT `get_rope_index`'s
+    `time = arange(t)·second_per_grid_t·tokens_per_second` (=2 for Lance video).
+    Default 1; at t=1 it is a no-op (arange(1)·k = [0]).
     """
-    t_idx = mx.arange(t, dtype=dtype).reshape(t, 1, 1)               # (t,1,1)
+    t_idx = (mx.arange(t, dtype=dtype) * temporal_scale).reshape(t, 1, 1)  # (t,1,1)
     h_idx = mx.arange(h, dtype=dtype).reshape(1, h, 1)               # (1,h,1)
     w_idx = mx.arange(w, dtype=dtype).reshape(1, 1, w)               # (1,1,w)
 
@@ -139,11 +151,16 @@ def build_positions_for_layout(
 
         # Placeholder tokens (length = t*h*w)
         block = _image_position_block(span.t, span.h, span.w,
-                                      base=text_cursor, dtype=dtype)  # (3, t*h*w)
+                                      base=text_cursor,
+                                      temporal_scale=span.temporal_scale,
+                                      dtype=dtype)                    # (3, t*h*w)
         rows.append(block)
-        # Per Qwen2.5-VL convention, advance the cursor by the *extent*
-        # max(t,h,w) so the next token sits one past the bounding grid.
-        text_cursor += max(span.t, span.h, span.w)
+        # Advance past the bounding grid: next token sits at max-position + 1.
+        # The temporal extent is (t-1)·temporal_scale (PT scales the time axis),
+        # so the advance is max((t-1)·scale, h-1, w-1) + 1.  At scale=1 this is
+        # exactly max(t,h,w) (the old behaviour) — image / T=1 unchanged.
+        text_cursor += max((span.t - 1) * span.temporal_scale,
+                           span.h - 1, span.w - 1) + 1
         next_token_idx += span.length
 
         # <vision_end> token (scalar position = text_cursor)

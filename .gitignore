@@ -50,6 +50,9 @@ out/lance_3b_mlx/*
 !out/lance_3b_video_mlx/
 out/lance_3b_video_mlx/*
 !out/lance_3b_video_mlx/metadata.json
+# STAGE 11 non-blind re-verification run-records (referenced by README).
+!out/stage11_x2t_verify.json
+!out/stage11_ti2i_velocity_verify.json
 
 # Nested git directories under refs/ (upstream PT repos) — keep their files,
 # drop their git history (`refs/Lance/.git/pack/*.pack` alone is ~99MB).

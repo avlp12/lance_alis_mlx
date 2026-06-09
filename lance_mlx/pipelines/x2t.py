@@ -42,12 +42,19 @@ PATCH_SIZE = 14
 SPATIAL_MERGE_SIZE = 2
 TEMPORAL_PATCH_SIZE = 2
 
+# Temporal mRoPE scale for VIDEO understanding = second_per_grid_t(1.0) ·
+# tokens_per_second(2).  PT `get_rope_index` scales the time axis by this on the
+# video branch (qwen2_navit.py:1258); the generation path already does it
+# (t2v.py:112).  x2t-image leaves it at 1 (T=1 → no-op).  [STAGE 11 fix]
+VIDEO_TEMPORAL_SCALE = 2
+
 # Special token ids (verified at STAGE 1, llm_config.json)
 IM_START_ID  = 151644
 IM_END_ID    = 151645
 VIS_START_ID = 151652
 VIS_END_ID   = 151653
 IMG_TOKEN_ID = 151655
+VIDEO_PAD_ID = 151656   # <|video_pad|> — placeholder for video visual tokens
 EOS_ID       = 151645   # Qwen Lance uses <|im_end|> as EOS for chat
 
 
@@ -63,7 +70,8 @@ def preprocess_image(image_path: str, *, min_pixels: int = 28 * 28,
       4. Duplicate temporal axis to T=2 (since temporal_patch_size=2 and
          a single image is treated as a 2-frame "video" with both frames
          identical — gives a 1-token temporal grid after the temporal patch).
-      5. Patchify: `(T=2, H, W, 3)` → `(N=T/2·H/14·W/14, C·t_p·p² = 1176)`.
+      5. Patchify via `_patchify_frames` — 2×2 spatial-merge-grouped token
+         order (the layout PT + mlx-vlm ViT require; see _patchify_frames).
 
     Returns: (patches, (T_grid, H_grid, W_grid)).
     """
@@ -82,23 +90,92 @@ def preprocess_image(image_path: str, *, min_pixels: int = 28 * 28,
     img_resized = img.resize((W_target, H_target), Image.BICUBIC)
     arr = np.asarray(img_resized, dtype=np.float32) / 255.0       # (H, W, 3) in [0, 1]
     arr = (arr - QWEN_VL_IMAGE_MEAN) / QWEN_VL_IMAGE_STD          # normalize
-    # T=2 by duplicating (single image)
+    # T=2 by duplicating (single image): two identical frames → T_grid=1 after
+    # the temporal patch.  Patchify is the shared 2×2-merge-grouped layout —
+    # one code path with preprocess_video so they can never diverge again.
     arr_t2 = np.stack([arr, arr], axis=0)                          # (2, H, W, 3)
-    # Patchify: spatial 14×14 patches, temporal 2-patch (handles T=2 → T_grid=1).
-    T = arr_t2.shape[0]
-    H_grid = H_target // PATCH_SIZE
-    W_grid = W_target // PATCH_SIZE
+    return _patchify_frames(arr_t2)
+
+
+def _patchify_frames(arr: np.ndarray) -> tuple[mx.array, tuple[int, int, int]]:
+    """arr: (T, H, W, 3) normalized float32, T even.  Returns (patches (N, 1176),
+    (T_grid, H_grid, W_grid)).
+
+    ★ Token order is 2×2 SPATIAL-MERGE-GROUPED — the exact layout PT
+    `data_utils.patchify_video_with_merge` emits and what *both* the PT ViT and
+    mlx-vlm `VisionModel` expect (they read consecutive-4 patches as one 2×2
+    spatial-merge block: `reshape(seq//merge_unit, merge_unit, -1)[window_index]`).
+
+    History (STAGE 11 step 2B): this used to emit *plain raster* (t,h,w) order.
+    That was wrong — vs the PT real pipeline our ViT output landed at cos≈0.29
+    (image) / 0.36 (video).  STAGE 7's harness fed the *same* raster patches to
+    both PT and MLX, so both mis-grouped identically and agreed at cos 1.0 —
+    structurally blind to patch order.  Merge-grouped input gives cos 1.000000
+    against PT's real `patchify_video_with_merge` → ViT pipeline.
+
+    PT does this on a CTHW tensor with permute (0,3,6,4,7,2,1,5,8); we hold THWC,
+    so the axes differ but the resulting (token, patch_dim) layout is identical:
+      token order   = (T_grid, H_grid/2, W_grid/2, ms_h, ms_w)  ← merge-grouped
+      patch_dim     = (C, t_p, p_h, p_w)                        ← channel-first
+    Position assignment (rope._image_position_block) is unchanged: the ViT output
+    (one token per 2×2 block, restored to llm-grid raster) already matches the
+    raster (t, h/2, w/2) order rope.py emits.
+    """
+    ms = SPATIAL_MERGE_SIZE
+    T, H, W = arr.shape[0], arr.shape[1], arr.shape[2]
+    H_grid, W_grid = H // PATCH_SIZE, W // PATCH_SIZE
     T_grid = T // TEMPORAL_PATCH_SIZE
-    # Reshape (T, H, W, 3) → (T_grid, t_p, H_grid, p, W_grid, p, 3)
-    arr_t2 = arr_t2.reshape(T_grid, TEMPORAL_PATCH_SIZE,
-                             H_grid, PATCH_SIZE,
-                             W_grid, PATCH_SIZE, 3)
-    # Move (t_p, p_h, p_w, c) to channel dim — PT order (c, t_p, p_h, p_w) flattened.
-    # PT einops: 'b (g t_p) (h p_h) (w p_w) c -> (b g h w) (c t_p p_h p_w)'
-    arr_t2 = arr_t2.transpose(0, 2, 4, 6, 1, 3, 5)                # (T_g, H_g, W_g, 3, t_p, p_h, p_w)
-    arr_t2 = arr_t2.reshape(T_grid * H_grid * W_grid,
-                             3 * TEMPORAL_PATCH_SIZE * PATCH_SIZE * PATCH_SIZE)
-    return mx.array(arr_t2.astype(np.float32)), (T_grid, H_grid, W_grid)
+    # Expose every axis: (T_grid, t_p, gh/ms, ms_h, p_h, gw/ms, ms_w, p_w, C)
+    a = arr.reshape(T_grid, TEMPORAL_PATCH_SIZE,
+                    H_grid // ms, ms, PATCH_SIZE,
+                    W_grid // ms, ms, PATCH_SIZE, 3)
+    #            T_grid  gh/ms  gw/ms  ms_h  ms_w   C   t_p  p_h  p_w
+    a = a.transpose(0,    2,     5,     3,    6,    8,   1,   4,   7)
+    a = a.reshape(T_grid * H_grid * W_grid, 3 * TEMPORAL_PATCH_SIZE * PATCH_SIZE * PATCH_SIZE)
+    return mx.array(a.astype(np.float32)), (T_grid, H_grid, W_grid)
+
+
+def preprocess_video(frames: np.ndarray, *,
+                     max_pixels: int = 14 * 14 * 16 * 16) -> tuple[mx.array, tuple[int, int, int]]:
+    """Video frames (N, H, W, 3) uint8 → ViT patch input.
+
+    Mirrors preprocess_image but with N real frames instead of a duplicated
+    single image.  Pads an odd N by repeating the last frame (PT
+    get_video_tensor_online does the same — temporal_patch_size=2 needs even N).
+    All frames are resized to one common multiple-of-28 size within the pixel
+    budget.  Frame *sampling* (which N to take) is video_io.MultiClipsFrameSampler.
+    """
+    N = int(frames.shape[0])
+    if N % 2 == 1:
+        frames = np.concatenate([frames, frames[-1:]], axis=0)
+        N += 1
+    H0, W0 = int(frames.shape[1]), int(frames.shape[2])
+    step = PATCH_SIZE * SPATIAL_MERGE_SIZE                      # 28
+    H_t = max(step, (H0 // step) * step)
+    W_t = max(step, (W0 // step) * step)
+    if H_t * W_t > max_pixels:
+        s = (max_pixels / (H_t * W_t)) ** 0.5
+        H_t = max(step, int(H_t * s) // step * step)
+        W_t = max(step, int(W_t * s) // step * step)
+    out = np.empty((N, H_t, W_t, 3), dtype=np.float32)
+    for i in range(N):
+        im = Image.fromarray(frames[i]).resize((W_t, H_t), Image.BICUBIC)
+        out[i] = (np.asarray(im, dtype=np.float32) / 255.0 - QWEN_VL_IMAGE_MEAN) / QWEN_VL_IMAGE_STD
+    return _patchify_frames(out)
+
+
+def load_video_vit(vit, video_weight_path: str) -> int:
+    """Load the video ViT (`vit_model.*`) from the merged video weight into a
+    LanceViT (which expects `vision_tower.*`).  Same architecture as the image
+    ViT — only the key prefix differs (verified: shapes byte-identical)."""
+    full = mx.load(video_weight_path)
+    vit_w = {
+        "vision_tower." + k[len("vit_model."):]: v
+        for k, v in full.items() if k.startswith("vit_model.")
+    }
+    vit.load_weights(list(vit_w.items()), strict=True)
+    mx.eval(vit.parameters())
+    return len(vit_w)
 
 
 @dataclass
@@ -211,6 +288,87 @@ def x2t(
         cur_mask = build_lance_attention_mask(
             seq_len=L_new, split_lens=[L_new], attn_modes=["causal"],
         )
+
+    text = tokenizer.decode(out_tokens, skip_special_tokens=True)
+    return X2TResult(text=text, tokens=out_tokens, n_visual_tokens=n_vis)
+
+
+def x2t_video(
+    model: LanceLLM,
+    vit: LanceViT,
+    tokenizer,
+    frames: np.ndarray,
+    question: str,
+    *,
+    system_prompt: str = "You are a helpful assistant.",
+    max_new_tokens: int = 60,
+    max_pixels: int = 14 * 14 * 16 * 16,
+) -> X2TResult:
+    """Video VQA / captioning.  Same forward as x2t() but the visual stream is
+    a multi-frame clip through the video ViT, placeheld with the *video* pad
+    token.  `frames` are pre-sampled (video_io.read_video_frames / fixture);
+    `vit` must already hold the video ViT (load_video_vit).
+
+    NOTE: a "does it run" path — PT byte-diff (stage11 step 2B/C) proves it.
+    Most of the body mirrors x2t() verbatim; kept separate so the verified
+    image path stays untouched.
+    """
+    patches, (T_g, H_g, W_g) = preprocess_video(frames, max_pixels=max_pixels)
+    grid_thw = mx.array([[T_g, H_g, W_g]], dtype=mx.int32)
+    visual = vit(patches, grid_thw)
+    n_vis = int(visual.shape[0])
+    h_lat, w_lat = H_g // SPATIAL_MERGE_SIZE, W_g // SPATIAL_MERGE_SIZE
+
+    sys_ids = tokenizer(system_prompt, add_special_tokens=False)["input_ids"]
+    q_ids = tokenizer(question, add_special_tokens=False)["input_ids"]
+    newline_id = tokenizer("\n", add_special_tokens=False)["input_ids"]
+    system_lbl = tokenizer("system", add_special_tokens=False)["input_ids"]
+    user_lbl = tokenizer("user", add_special_tokens=False)["input_ids"]
+    assist_lbl = tokenizer("assistant", add_special_tokens=False)["input_ids"]
+
+    seq = (
+        [IM_START_ID] + system_lbl + newline_id + sys_ids + [IM_END_ID] + newline_id
+        + [IM_START_ID] + user_lbl + newline_id
+        + [VIS_START_ID] + [VIDEO_PAD_ID] * n_vis + [VIS_END_ID]
+        + q_ids + [IM_END_ID] + newline_id
+        + [IM_START_ID] + assist_lbl + newline_id
+    )
+    L = len(seq)
+    vis_start_idx = seq.index(VIS_START_ID) + 1
+    vis_end_idx = vis_start_idx + n_vis
+
+    attn_mask = build_lance_attention_mask(seq_len=L, split_lens=[L], attn_modes=["causal"])
+    vis_span = VisionSpec(start=vis_start_idx - 1, length=n_vis, t=T_g, h=h_lat, w=w_lat,
+                          temporal_scale=VIDEO_TEMPORAL_SCALE)
+    pos = build_positions_for_layout(L, [vis_span])
+
+    ids = mx.array([seq], dtype=mx.int32)
+    text_embed = model.language_model.model.embed_tokens(ids)
+    embed = mx.concatenate([
+        text_embed[:, :vis_start_idx, :],
+        visual[None, :, :],
+        text_embed[:, vis_end_idx:, :],
+    ], axis=1)
+
+    out_tokens: list[int] = []
+    cur_embed, cur_pos, cur_mask = embed, pos, attn_mask
+    for _ in range(max_new_tokens):
+        hidden = model.language_model.model(
+            input_ids=None, position_ids=cur_pos, inputs_embeds=cur_embed,
+            mask=cur_mask, gen_mask=None,
+        )
+        logits = model.language_model.lm_head(hidden[0, -1:, :])
+        next_id = int(mx.argmax(logits[0]).item())
+        out_tokens.append(next_id)
+        if next_id == IM_END_ID:
+            break
+        new_pos_val = int(cur_pos[:, 0, -1][0].item()) + 1
+        new_pos_col = mx.array([[[new_pos_val]], [[new_pos_val]], [[new_pos_val]]], dtype=mx.int32)
+        cur_pos = mx.concatenate([cur_pos, new_pos_col], axis=-1)
+        new_embed = model.language_model.model.embed_tokens(mx.array([[next_id]], dtype=mx.int32))
+        cur_embed = mx.concatenate([cur_embed, new_embed], axis=1)
+        L_new = cur_embed.shape[1]
+        cur_mask = build_lance_attention_mask(seq_len=L_new, split_lens=[L_new], attn_modes=["causal"])
 
     text = tokenizer.decode(out_tokens, skip_special_tokens=True)
     return X2TResult(text=text, tokens=out_tokens, n_visual_tokens=n_vis)

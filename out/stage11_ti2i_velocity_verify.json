@@ -1,0 +1,58 @@
+{
+  "image": "out/test_synthetic.png",
+  "instruction": "Make it more vibrant and saturated.",
+  "size": 256,
+  "seed": 0,
+  "grid": [
+    1,
+    16,
+    16
+  ],
+  "n_vit": 64,
+  "n_cond": 256,
+  "a_pass": true,
+  "patches_byte_identical": true,
+  "vit_cos": 1.0000001192092896,
+  "vit_cos_raster": 0.8213760256767273,
+  "positions_byte_identical_to_PT_all": true,
+  "cos_fixed_min": 0.9996399879455566,
+  "velocity_vit_sensitive": true,
+  "raster_cos_min": 0.9963346719741821,
+  "gate_pass": true,
+  "layouts": [
+    {
+      "name": "v_full",
+      "L": 658,
+      "has_vit": true,
+      "positions_byte_identical_to_PT": true,
+      "cos_fixed": 0.9996399879455566,
+      "cos_raster": 0.9963346719741821,
+      "v_norm_pt": 139.39517211914062,
+      "v_norm_mlx": 137.7021026611328,
+      "pass": true
+    },
+    {
+      "name": "v_t_uncond",
+      "L": 595,
+      "has_vit": true,
+      "positions_byte_identical_to_PT": true,
+      "cos_fixed": 0.9997972249984741,
+      "cos_raster": 0.9996457099914551,
+      "v_norm_pt": 127.29784393310547,
+      "v_norm_mlx": 126.47662353515625,
+      "pass": true
+    },
+    {
+      "name": "v_tv_uncond",
+      "L": 529,
+      "has_vit": false,
+      "positions_byte_identical_to_PT": true,
+      "cos_fixed": 0.9997804164886475,
+      "cos_raster": null,
+      "v_norm_pt": 118.83061218261719,
+      "v_norm_mlx": 118.55538177490234,
+      "pass": true
+    }
+  ],
+  "scope": "image-only (T=1, bug#2 immune); cond_flat=MLX VAE encode shared (byte-verified STAGE 8); mask=PT create_sparse_mask; given identical resized+normalized cond frames & grid"
+}
