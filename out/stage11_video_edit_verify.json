@@ -1,0 +1,56 @@
+{
+  "grid": {
+    "vit": [
+      4,
+      8,
+      16
+    ],
+    "vae_lat": [
+      2,
+      8,
+      8
+    ],
+    "n_vit": 128,
+    "n_cond": 128,
+    "frames": 8,
+    "vae_size": [
+      128,
+      128
+    ]
+  },
+  "a_vit_patches_byte_identical": true,
+  "a_vit_cos": 0.9999999993889538,
+  "a_positions_byte_identical_all": true,
+  "b_velocity": [
+    {
+      "name": "v_full",
+      "cos_fixed": 0.9999290097676393,
+      "cos_raster": 0.9941769684616948
+    },
+    {
+      "name": "v_t_uncond",
+      "cos_fixed": 0.9999372731010824,
+      "cos_raster": 0.9992166997683162
+    },
+    {
+      "name": "v_tv_uncond",
+      "cos_fixed": 0.9999095945194084,
+      "cos_raster": null
+    }
+  ],
+  "b_cos_min": 0.9999095945194084,
+  "b_raster_min": 0.9941769684616948,
+  "b_raster_discriminates": true,
+  "c_k_steps": 5,
+  "c_latent_cos_per_step": [
+    0.9999998936372091,
+    0.9999997540893343,
+    0.9999995632636091,
+    0.999999278853174,
+    0.9999988812434509
+  ],
+  "c_cos_min": 0.9999988812434509,
+  "c_no_compounding": true,
+  "gate_pass": true,
+  "scope": "cond encode scale de-blind separate (stage11_video_edit_cond_scale, cos=1.0); full pixel implied by accumulation cos + STAGE 8 byte-clean decode; given resized frames+grid"
+}
