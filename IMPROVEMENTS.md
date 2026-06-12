@@ -256,3 +256,17 @@ Format:
 - **분류:** 검증 (레퍼런스 선택).
 - **리스크:** "검증된 라이브러리"가 같은 누락을 공유하면 parity 가 거짓 안심.
 - **상태:** 기록됨(교훈).  진짜 truth = PT-Lance `get_rope_index`.  LEARNING_LOG stage_7 §8 + 공개문서.
+
+## [STAGE 11] video_edit (TIV2V) 착수 — 위 Risk C/VAE-scale 우려 해소 (6/6 완성)
+- **발견:** video_edit = image_edit 메서드의 video 경로(PT `tiv2v_sample`).  위 두 forward-looking 우려가
+  실제 착수에서 발화·해소됨: (Risk C) cond+noise 두 contiguous span = image_edit.py 의 multi-slab scatter
+  패턴 재사용으로 처리(t2v 의 single-span assert 우회 아님); (VAE scale) decode·cond-encode 둘 다 production
+  scale `(mean, 1/std)` 명시 적용 — cond-encode scale 은 PT Wan VAE 독립 encode 와 cos 1.0 으로 비-장님 확인.
+- **분류:** 구현 + 검증 (조립).
+- **리스크:** 신규 알고리즘 0 — 신규 위험은 *조립*(3슬랩 결합·위치).  STAGE 7 교훈(조각 맞아도 composition
+  틀림) → 비-장님으로 결합 검증.
+- **상태:** **완료(measurement).**  `lance_mlx/pipelines/video_edit.py`.  비-장님:
+  (a) ViT cos 1.0 + 3슬랩 위치 byte-id(PT `get_rope_index`+`shift_position_ids` 독립, temporal×2 양쪽·
+  base→1000·noise←cond) (b) 3-comp velocity min cos 0.99991 + raster v_full 0.994 붕괴 (c) 5-step 누적
+  latent cos 0.999999 / cond scale cos 1.0.  `tools/stage11_video_edit_verify.py`(+json)·
+  `stage11_video_edit_cond_scale.py`.  → **ByteDance Lance 6태스크 6/6 전부 구현·비-장님 검증.**

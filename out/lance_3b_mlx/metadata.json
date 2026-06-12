@@ -27,7 +27,9 @@
       "STAGE 5: image VAE round-trip >= 40 dB PSNR (T=1)",
       "STAGE 6: T2I 30-step latent cos >= 0.999 vs PT 30-step",
       "STAGE 7: TI2I 3-forward cos >= 0.999 vs PT (forward parity; the ViT preprocessing it shared with PT was later found mis-ordered -- see post_release_correction)",
-      "STAGE 11: x2t image+video re-verified non-blind -- PT-recomputed patches & positions byte-identical, K=8 top-1 8/8, min logit cos 0.999124 (image) / 0.999437 (video)"
+      "STAGE 11: x2t image+video re-verified non-blind -- PT-recomputed patches & positions byte-identical, K=8 top-1 8/8, min logit cos 0.999124 (image) / 0.999437 (video)",
+      "STAGE 11: image_edit (TI2I) velocity re-verified non-blind -- PT recomputes ViT-cond; 3-component velocity min cos 0.999640; raster control collapses v_full",
+      "STAGE 11: video_edit (TIV2V) re-verified non-blind -- ViT + 3-slab mRoPE positions byte-identical, 3-component velocity min cos 0.99991, 5-step accumulation latent cos 0.999999, cond VAE-encode scale cos 1.0. All six Lance tasks implemented + verified."
     ]
   },
   "compatible_with": {

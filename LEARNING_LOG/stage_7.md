@@ -334,8 +334,13 @@ positions를 독립 산출 + byte-assert, production prompt, K=8, raster 대조�
 
 ### 스코프 (정직)
 동일 pre-resize 프레임 주입(PT `vit_transform` bucket resize는 out-of-scope) / normalization 재타이핑 /
-video ViT 라운드트립(mitigated 390/390) / image_edit 3-comp CFG velocity 비-장님 재검증 미실행
-(분해논증만; fresh 세션) / video_edit 미착수.
+video ViT 라운드트립(mitigated 390/390).
+**갱신(2026-06-11):** image_edit 3-comp CFG velocity = ✅ **비-장님 재검증 완료**(min cos 0.999640, raster v_full 붕괴;
+`tools/stage11_ti2i_velocity_verify.py`). video_edit = ✅ **구현·비-장님 검증 완료**(image_edit의 video 경로):
+(a) ViT 1.0 + 3슬랩 위치 byte-id(PT get_rope_index+shift, temporal×2 양쪽·base→1000·noise←cond) (b) velocity 0.99991 +
+raster v_full 0.994 붕괴 (c) 5-step 누적 latent cos 0.999999 / cond scale cos 1.0(PT Wan VAE 독립).
+`tools/stage11_video_edit_verify.py`(+json)·`stage11_video_edit_cond_scale.py`. → **6태스크 6/6 전부 구현·검증**.
+full pixel은 누적 cos + STAGE 8 decode byte-clean으로 함의(직접 미측정).
 
 ### 새 교훈 2개 (numbering은 형님 확정)
 - **Lesson 24 — PT 직접 import도 우리 중간결과를 먹이면 장님.** Lesson E(검증 도구가 거짓말)와

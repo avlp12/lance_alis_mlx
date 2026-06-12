@@ -19,10 +19,13 @@ starts.
 | 8 | 3D Causal Video VAE (T > 1) | ✓ 4 gates cos = 1.000000 (encode + decode) |
 | 9 | Video DiT + t2v (text-to-video) | ✓ 30-step per-step cos ≥ 0.999, video pixel cos = 0.999338 |
 | 11 | x2t (image + video) non-blind re-verification | ✓ patches + positions PT-recomputed byte-identical; K=8 top-1 8/8, min logit cos 0.999124 (image) / 0.999437 (video) |
+| 11 | image_edit (TI2I) velocity non-blind re-verification | ✓ ViT-cond PT-recomputed; 3-comp velocity min cos 0.999640; raster control collapses v_full |
+| 11 | video_edit (TIV2V) non-blind re-verification | ✓ ViT + 3-slab positions byte-identical; velocity min cos 0.99991; 5-step accumulation cos 0.999999; cond scale cos 1.0 |
 
-**STAGE 1–9 complete.**  Every core path of Lance — image / video generation,
-editing, understanding — is ported to MLX and byte-diff verified against the
-original PyTorch.
+**STAGE 1–9 complete; all six Lance tasks ported + verified** (t2i / t2v / x2t
+image+video / image_edit / video_edit).  Every core path of Lance — image / video
+generation, editing, understanding — is ported to MLX and byte-diff verified against
+the original PyTorch.
 
 Stage 7 numbers *(as originally measured — see the Post-release correction below)*:
 
@@ -107,11 +110,18 @@ matching PT's true output after the fix), confirming it was a real bug, not cosm
 
 **Honest scope.** The gate injects identical pre-resized frames to both sides; PT's real
 `vit_transform` bucket resize is *not* exercised (claim scope = "given identical resized /
-normalized frames and grid"). `image_edit`'s 3-component CFG velocity is **not yet
-re-verified non-blind** (its Stage 7 harness still copies our ViT output); the ViT
-conditioning it relies on shares the now-fixed `preprocess_image` *code* (so that code is
-re-verified), but `image_edit`'s full pipeline is not itself re-verified non-blind — we do
-not claim it is "covered" by inference. `video_edit` is not yet implemented.
+normalized frames and grid"). `image_edit`'s 3-component CFG velocity **is now re-verified
+non-blind** (Stage 11): PT recomputes the ViT-conditioning from the raw image and the velocity
+matches at min cos 0.999640, with the old raster order kept as a discriminative control that
+collapses `v_full` to 0.996. `video_edit` is now **implemented and re-verified non-blind** too
+— it is `image_edit`'s method on the video path (PT `tiv2v_sample`). PT recomputes patches, the
+video ViT, and the 3-slab mRoPE positions (`get_rope_index` + `shift_position_ids`,
+byte-identical); the 3-component velocity matches at min cos 0.99991 (raster control collapses
+`v_full` to 0.994), and a 5-step trajectory holds at latent cos 0.999999 (per-step error does
+not compound). The cond VAE-encode scale is separately de-blind against a PT Wan VAE at
+cos 1.000000. Full pixel decode is not measured directly — it is implied by the per-step +
+accumulation cos and the byte-clean Stage 8 VAE decode. **This completes all six Lance tasks**
+(t2i / t2v / x2t image+video / image_edit / video_edit).
 
 ## Verification doctrine
 
@@ -137,9 +147,9 @@ Every block:
 ## Pure-MLX inference, PyTorch only at verification time
 
 The `lance_mlx/` package never imports `torch` or `refs/Lance` at runtime.
-Inference (`t2i`, `t2v`, `x2t`, `image_edit`) runs on MLX + the HF Qwen2 fast
-tokenizer only — verified by tracing `sys.modules` after import (zero
-`torch` / `refs` / `flash_attn` modules loaded).
+Inference (`t2i`, `t2v`, `x2t` image+video, `image_edit`, `video_edit`) runs on
+MLX + the HF Qwen2 fast tokenizer only — verified by tracing `sys.modules` after
+import (zero `torch` / `refs` / `flash_attn` modules loaded).
 
 The PT byte-diff harnesses in `tools/stage*_compare.py` *do* import upstream
 PyTorch under a shim — that is the entire point.  PyTorch is the source of
