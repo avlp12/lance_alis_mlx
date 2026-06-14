@@ -268,6 +268,39 @@ PYTHONPATH=. .venv/bin/python tools/stage7_x2t_smoke.py         # X→T (image-t
 PYTHONPATH=. .venv/bin/python tools/stage7_ti2i_smoke.py        # TI2I (image edit)
 ```
 
+## Web UI (Gradio)
+
+A browser front-end over the six verified pipelines lives in `app.py` — a pure UI
+layer that calls the pipeline functions verbatim (no new model logic):
+
+```bash
+.venv/bin/pip install gradio
+.venv/bin/python app.py          # open the printed http://127.0.0.1:7860
+```
+
+Six tabs — **t2i**, **image_edit**, **x2t** (image→text), **t2v**, **x2t_video**,
+**video_edit**.  The image bundle (LLM + ViT) and video bundle are lazy-loaded once on
+first use and cached; the Wan VAE is shared.
+
+Practical settings (measured, not assumed):
+
+- **Resolution.** Lance images are trained at **768** (`image_768res`); below ~512 the
+  output is out-of-distribution and breaks (seams / oversaturation).  Video runs at a
+  **video preset** (~480 = 360p) — lower than image.  The UI defaults to these.
+- **Decode scale.** Generated latents live in the Wan-VAE normalized space, so decode
+  must un-normalize with the per-channel `(mean, 1/std)` scale (PT's `WanVAE.decode`
+  always does); omitting it oversaturates.
+- **Prompts.** Lance is very prompt-sensitive — short prompts look rough; detailed
+  prompts (cf. `refs/Lance/config/examples/t2i_example.json`) are much better.
+- **Quality (honest).** Lance-3B is a **3B unified any-to-any** model; its image / video
+  *generation* is modest — clearly below dedicated diffusion engines (SDXL / FLUX).  Its
+  strengths are breadth (six tasks in one model) and the understanding / editing paths,
+  not photorealism.  We confirmed PT and our MLX produce the *same* modest quality at 768
+  (latent cos 0.94 = bf16-vs-f32 precision over the long flow trajectory, not a port bug);
+  the official showcase images are best-case.
+- **Cost.** Generation is heavy — t2v ≈ 90 s at 480 / 13 frames; image_edit and
+  video_edit are several minutes (3-component CFG).  Keep video clips short.
+
 ## Project context
 
 This is an *observation learning* project.  One person (Alis) sets the

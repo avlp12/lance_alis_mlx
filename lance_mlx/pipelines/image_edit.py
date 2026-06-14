@@ -44,6 +44,7 @@ from .x2t import (
     IMG_TOKEN_ID, PATCH_SIZE, SPATIAL_MERGE_SIZE, TEMPORAL_PATCH_SIZE,
     QWEN_VL_IMAGE_MEAN, QWEN_VL_IMAGE_STD,
 )
+from .t2v import VAE_SCALE_MEAN, VAE_SCALE_STD   # Wan VAE per-channel decode scale
 
 
 # Lance edit-mode system prompt (verbatim from `refs/Lance/data/common.py:35`,
@@ -327,6 +328,10 @@ def image_edit(
                   f"({time.time()-t0:.1f}s)")
 
     latent = x_t.reshape(1, t_lat, h_lat, w_lat, Z_DIM)
-    image = vae.decode(latent)
+    # Decode with the production Wan-VAE scale (un-normalize); without it the
+    # dynamic range is off / oversaturated (same bug t2i had — PT's WanVAE.decode
+    # always applies this scale).
+    vae_scale = (mx.array(VAE_SCALE_MEAN), mx.array(1.0 / VAE_SCALE_STD))
+    image = vae.decode(latent, scale=vae_scale)
     mx.eval(image)
     return TI2IResult(latent=latent, image_recon=image)
