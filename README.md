@@ -18,14 +18,18 @@ starts.
 | 7 | ViT + X→T + TI2I (3 pipelines) | ✓ forward parity; ⚠ preprocessing bug found post-release — re-verified non-blind in Stage 11 (see correction note) |
 | 8 | 3D Causal Video VAE (T > 1) | ✓ 4 gates cos = 1.000000 (encode + decode) |
 | 9 | Video DiT + t2v (text-to-video) | ✓ 30-step per-step cos ≥ 0.999, video pixel cos = 0.999338 |
-| 11 | x2t (image + video) non-blind re-verification | ✓ patches + positions PT-recomputed byte-identical; K=8 top-1 8/8, min logit cos 0.999124 (image) / 0.999437 (video) |
-| 11 | image_edit (TI2I) velocity non-blind re-verification | ✓ ViT-cond PT-recomputed; 3-comp velocity min cos 0.999640; raster control collapses v_full |
-| 11 | video_edit (TIV2V) non-blind re-verification | ✓ ViT + 3-slab positions byte-identical; velocity min cos 0.99991; 5-step accumulation cos 0.999999; cond scale cos 1.0 |
+| 11a | x2t (image + video) — non-blind re-verification | ✓ patches + positions PT-recomputed byte-identical; K=8 top-1 8/8, min logit cos 0.999124 (image) / 0.999437 (video) |
+| 11b | image_edit (TI2I) — velocity non-blind re-verification | ✓ ViT-cond PT-recomputed; 3-comp velocity min cos 0.999640; raster control collapses v_full |
+| 11c | video_edit (TIV2V) — non-blind re-verification | ✓ ViT + 3-slab positions byte-identical; velocity min cos 0.99991; 5-step accumulation cos 0.999999; cond scale cos 1.0 |
 
-**STAGE 1–9 complete; all six Lance tasks ported + verified** (t2i / t2v / x2t
-image+video / image_edit / video_edit).  Every core path of Lance — image / video
-generation, editing, understanding — is ported to MLX and byte-diff verified against
-the original PyTorch.
+*Numbering note: stages 1–9 are the port. **Stage 10 (quantization) is planned, not yet
+started** — hence 9 → 11. **Stage 11** is the post-release non-blind re-verification; its
+three parts (11a / 11b / 11c) cover x2t, image_edit, and video_edit.*
+
+**Stages 1–9 (the port) + Stage 11 (re-verification) complete; all six Lance tasks ported
+and verified** (t2i / t2v / x2t image+video / image_edit / video_edit).  Every core path of
+Lance — image / video generation, editing, understanding — is ported to MLX and byte-diff
+verified against the original PyTorch.
 
 Stage 7 numbers *(as originally measured — see the Post-release correction below)*:
 
@@ -203,7 +207,7 @@ lance_mlx/       MLX implementations (backbone, rope, attention mask, pipelines,
                    — pure MLX, no torch/refs import at runtime
 tools/           Cross-validation harnesses + smoke tests (one per stage / block)
                    — these *do* import upstream PT (the verification source of truth)
-LEARNING_LOG/    Per-stage notes, 23 lessons distilled, audit trail of wrong hypotheses
+LEARNING_LOG/    Per-stage notes, 25 lessons distilled, audit trail of wrong hypotheses
 out/audit_manual_v_t/  intentionally *wrong* manual ground-truth fixtures, kept as the
                    byte-level evidence behind Lesson 18 (see its README)
 archive/         superseded working notes (kept for trace, not load-bearing)
